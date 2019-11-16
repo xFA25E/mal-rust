@@ -5,8 +5,8 @@ mod hashkey;
 mod reader;
 mod value;
 
-mod step5_tco;
-use step5_tco::main as mmain;
+mod step6_file;
+use step6_file::main as mmain;
 
 fn main() {
     let result = mmain();

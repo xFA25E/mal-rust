@@ -5,6 +5,7 @@ use std::{
 };
 
 use crate::{
+    core::EvalResult,
     env::Env,
     error::{EvalError, MalError},
     hashkey::LispHashKey,
@@ -43,7 +44,7 @@ pub fn main() -> Result<(), MalError> {
     }
 }
 
-pub fn eval(mut ast: Value, mut env: Env) -> Result<Value, EvalError> {
+pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
     loop {
         match ast {
             Value::List(form) => match form.front() {
@@ -203,7 +204,7 @@ pub fn eval(mut ast: Value, mut env: Env) -> Result<Value, EvalError> {
     }
 }
 
-fn eval_ast(ast: Value, env: Env) -> Result<Value, EvalError> {
+fn eval_ast(ast: Value, env: Env) -> EvalResult {
     match ast {
         Value::Symbol(s) => env.get(&s).ok_or_else(|| EvalError::SymbolNotFound),
         Value::List(l) => Ok(Value::List(
