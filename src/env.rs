@@ -1,10 +1,10 @@
 use std::{
     cell::RefCell,
-    collections::{hash_map::Entry, HashMap, VecDeque},
+    collections::{HashMap, VecDeque},
     rc::Rc,
 };
 
-use crate::{error::EvalError, value::Value};
+use crate::value::Value;
 
 pub struct Env(Rc<LispEnv>);
 
@@ -21,10 +21,9 @@ impl Env {
         }
     }
 
-    pub fn get(&self, k: &Rc<String>) -> Result<Value, EvalError> {
+    pub fn get(&self, k: &Rc<String>) -> Option<Value> {
         self.find(k)
             .and_then(|env| env.0.data.borrow().get(k).map(|c| c.clone()))
-            .ok_or_else(|| EvalError::SymbolNotFound)
     }
 
     fn find(&self, k: &Rc<String>) -> Option<Self> {

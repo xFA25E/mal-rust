@@ -205,7 +205,7 @@ pub fn eval(mut ast: Value, mut env: Env) -> Result<Value, EvalError> {
 
 fn eval_ast(ast: Value, env: Env) -> Result<Value, EvalError> {
     match ast {
-        Value::Symbol(s) => env.get(&s),
+        Value::Symbol(s) => env.get(&s).ok_or_else(|| EvalError::SymbolNotFound),
         Value::List(l) => Ok(Value::List(
             l.iter()
                 .map(|elm| eval(elm.clone(), env.clone()))
