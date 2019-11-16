@@ -1,18 +1,33 @@
 use std::{
+    clone::Clone,
     convert::TryFrom,
     fmt::{self, Debug, Display},
+    rc::Rc,
 };
 
 use crate::{error::ReadError, value::Value};
 
-#[derive(PartialEq, Eq, Hash, Clone)]
+#[derive(PartialEq, Eq, Hash)]
 pub enum LispHashKey {
-    Keyword(String),
-    String(String),
-    Symbol(String),
+    Keyword(Rc<String>),
+    String(Rc<String>),
+    Symbol(Rc<String>),
     Number(i128),
     Bool(bool),
     Nil,
+}
+
+impl Clone for LispHashKey {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Keyword(k) => Self::Keyword(Rc::clone(k)),
+            Self::String(s) => Self::String(Rc::clone(s)),
+            Self::Symbol(s) => Self::Symbol(Rc::clone(s)),
+            Self::Number(n) => Self::Number(*n),
+            Self::Bool(b) => Self::Bool(*b),
+            Self::Nil => Self::Nil,
+        }
+    }
 }
 
 impl Display for LispHashKey {

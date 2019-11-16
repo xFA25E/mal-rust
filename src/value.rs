@@ -1,29 +1,30 @@
 use std::{
+    clone::Clone,
     cmp::PartialEq,
     collections::{HashMap, VecDeque},
     fmt::{self, Debug, Display},
+    rc::Rc,
 };
 
 use crate::{env::Env, error::EvalError, hashkey::LispHashKey};
 
-#[derive(Clone)]
 pub enum Value {
     Nil,
     Bool(bool),
     Number(i128),
-    Symbol(String),
-    Keyword(String),
-    String(String),
-    List(VecDeque<Value>),
-    Vector(Vec<Value>),
-    HashMap(HashMap<LispHashKey, Value>),
-    Function(fn(VecDeque<Value>) -> Result<Value, EvalError>),
+    Symbol(Rc<String>),
+    Keyword(Rc<String>),
+    String(Rc<String>),
+    List(Rc<VecDeque<Value>>),
+    Vector(Rc<Vec<Value>>),
+    HashMap(Rc<HashMap<LispHashKey, Value>>),
+    Function(fn(Rc<VecDeque<Value>>) -> Result<Value, EvalError>),
     Closure {
         env: Env,
-        binds: Vec<String>,
-        body: Box<Value>,
+        binds: Rc<Vec<Rc<String>>>,
+        body: Rc<Value>,
     },
-    Comment(()),
+    Comment,
 }
 
 impl Value {
@@ -32,6 +33,29 @@ impl Value {
             Ok(*n)
         } else {
             Err(EvalError::InvalidArgumentType)
+        }
+    }
+}
+
+impl Clone for Value {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Nil => Self::Nil,
+            Self::Bool(b) => Self::Bool(*b),
+            Self::Number(n) => Self::Number(*n),
+            Self::Symbol(s) => Self::Symbol(Rc::clone(s)),
+            Self::Keyword(s) => Self::Keyword(Rc::clone(s)),
+            Self::String(s) => Self::String(Rc::clone(s)),
+            Self::List(l) => Self::List(Rc::clone(l)),
+            Self::Vector(v) => Self::Vector(Rc::clone(v)),
+            Self::HashMap(h) => Self::HashMap(Rc::clone(h)),
+            Self::Function(fp) => Self::Function(*fp),
+            Self::Closure { env, binds, body } => Self::Closure {
+                env: env.clone(),
+                binds: Rc::clone(binds),
+                body: Rc::clone(body),
+            },
+            Self::Comment => Self::Comment,
         }
     }
 }
@@ -65,7 +89,7 @@ impl PartialEq for Value {
             },
             Self::List(list) => match other {
                 Self::List(o) => list == o,
-                Self::Vector(v) => list == v,
+                Self::Vector(v) => list.as_ref() == v.as_ref(),
                 _ => false,
             },
             Self::Vector(vector) => match other {
@@ -88,7 +112,7 @@ impl PartialEq for Value {
                 binds: _,
                 body: _,
             } => false,
-            Self::Comment(()) => false,
+            Self::Comment => false,
         }
     }
 }
@@ -123,7 +147,7 @@ impl Display for Value {
                 display_seq(l.iter(), f)?;
                 write!(f, ")")
             }
-            Self::Comment(_) => Ok(()),
+            Self::Comment => Ok(()),
         }
     }
 }

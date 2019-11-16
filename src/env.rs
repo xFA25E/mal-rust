@@ -9,7 +9,7 @@ use crate::{error::EvalError, value::Value};
 pub struct Env(Rc<LispEnv>);
 
 struct LispEnv {
-    data: RefCell<HashMap<String, Value>>,
+    data: RefCell<HashMap<Rc<String>, Value>>,
     outer: Option<Env>,
 }
 
@@ -21,20 +21,20 @@ impl Env {
         }
     }
 
-    pub fn get(&self, k: &str) -> Result<Value, EvalError> {
+    pub fn get(&self, k: &Rc<String>) -> Result<Value, EvalError> {
         self.find(k)
             .and_then(|env| env.0.data.borrow().get(k).map(|c| c.clone()))
             .ok_or_else(|| EvalError::SymbolNotFound)
     }
 
-    fn find(&self, k: &str) -> Option<Self> {
+    fn find(&self, k: &Rc<String>) -> Option<Self> {
         self.0.data.borrow().get(k).map_or_else(
             || self.0.outer.as_ref().and_then(|e| e.find(k)),
             |_| Some(Self(Rc::clone(&self.0))),
         )
     }
 
-    pub fn set(&self, key: String, value: Value) -> Value {
+    pub fn set(&self, key: Rc<String>, value: Value) -> Value {
         match self.0.data.borrow_mut().entry(key) {
             Entry::Occupied(mut o) => {
                 *o.get_mut() = value;
@@ -52,7 +52,7 @@ impl Clone for Env {
 }
 
 pub struct EnvBuilder {
-    data: HashMap<String, Value>,
+    data: HashMap<Rc<String>, Value>,
     outer: Option<Env>,
 }
 
@@ -65,54 +65,62 @@ impl EnvBuilder {
     pub fn with_core(mut self) -> Self {
         use crate::core::{
             add, count, divide, emptyp, equal, greater, greater_equal, less, less_equal, list,
-            listp, multiply, pr_str, println, prn, str, subtract,
+            listp, multiply, pr_str, println, prn, str, subtract, Args, EvalResult,
         };
 
-        self.data.insert("+".into(), Value::Function(add));
-        self.data.insert("-".into(), Value::Function(subtract));
-        self.data.insert("*".into(), Value::Function(multiply));
-        self.data.insert("/".into(), Value::Function(divide));
-        self.data.insert("prn".into(), Value::Function(prn));
-        self.data.insert("list".into(), Value::Function(list));
-        self.data.insert("list?".into(), Value::Function(listp));
-        self.data.insert("empty?".into(), Value::Function(emptyp));
-        self.data.insert("count".into(), Value::Function(count));
-        self.data.insert("=".into(), Value::Function(equal));
-        self.data.insert("<".into(), Value::Function(less));
-        self.data.insert("<=".into(), Value::Function(less_equal));
-        self.data.insert(">".into(), Value::Function(greater));
-        self.data
-            .insert(">=".into(), Value::Function(greater_equal));
-        self.data.insert("pr-str".into(), Value::Function(pr_str));
-        self.data.insert("str".into(), Value::Function(str));
-        self.data.insert("println".into(), Value::Function(println));
+        let funcs: &[(&str, fn(Args) -> EvalResult)] = &[
+            ("+", add),
+            ("-", subtract),
+            ("*", multiply),
+            ("/", divide),
+            ("prn", prn),
+            ("list", list),
+            ("list?", listp),
+            ("empty?", emptyp),
+            ("count", count),
+            ("=", equal),
+            ("<", less),
+            ("<=", less_equal),
+            (">", greater),
+            (">=", greater_equal),
+            ("pr-str", pr_str),
+            ("str", str),
+            ("println", println),
+        ];
+
+        for (n, f) in funcs {
+            self.data.insert(Rc::new((*n).into()), Value::Function(*f));
+        }
+
         self
     }
 
-    pub fn binds(mut self, vars: &Vec<String>, mut values: VecDeque<Value>) -> Self {
-        let mut iter = vars.iter();
+    pub fn binds(mut self, vars: &Vec<Rc<String>>, mut values: Rc<VecDeque<Value>>) -> Self {
+        let mut vars_iter = vars.iter();
+        let values_ref = Rc::make_mut(&mut values);
 
-        while let Some(s) = iter.next() {
-            if s != "&" {
-                self.data.insert(
-                    s.clone(),
-                    values
-                        .pop_front()
-                        .expect("eval bug: not enough arguments! Should check at before!"),
-                );
+        while let Some(s) = vars_iter.next() {
+            if s.as_ref() != "&" {
+                let value = values_ref
+                    .pop_front()
+                    .expect("eval bug: not enough arguments! Should check at before!");
+
+                self.data.insert(Rc::clone(s), value);
             } else {
-                let next_sym = iter
+                let next_sym = vars_iter
                     .next()
                     .expect("eval bug: not enough arguments for rest (&) parameters");
+
                 self.data.insert(next_sym.clone(), Value::List(values));
-                if let Some(_) = iter.next() {
+
+                if let Some(_) = vars_iter.next() {
                     panic!("too much arguments after rest (&) parameters");
                 }
                 break;
             }
         }
 
-        if let Some(_) = iter.next() {
+        if let Some(_) = vars_iter.next() {
             panic!("not enough values for function");
         }
 

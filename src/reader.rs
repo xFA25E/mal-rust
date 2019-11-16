@@ -5,6 +5,7 @@ use std::{
     collections::{HashMap, VecDeque},
     convert::TryInto,
     iter::Peekable,
+    rc::Rc,
 };
 
 use crate::{error::ReadError, value::Value};
@@ -42,14 +43,14 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
             token if token.starts_with('(') => self.read_list(),
             token if token.starts_with('[') => self.read_vector(),
             token if token.starts_with('{') => self.read_hash_map(),
-            token if token.starts_with(';') => Ok(Value::Comment(())),
+            token if token.starts_with(';') => Ok(Value::Comment),
             token => Self::read_atom(token),
         }
     }
 
     fn read_ignore_comment(&mut self) -> ReadResult {
         let mut value = self.read()?;
-        while let Value::Comment(_) = value {
+        while let Value::Comment = value {
             value = self.read()?;
         }
         Ok(value)
@@ -61,7 +62,7 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
             let token = self.0.peek().ok_or_else(|| ReadError::UnexpectedEnd)?;
             if token.starts_with(')') {
                 self.0.next();
-                return Ok(Value::List(list));
+                return Ok(Value::List(Rc::new(list)));
             }
             list.push_back(self.read_ignore_comment()?);
         }
@@ -73,7 +74,7 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
             let token = self.0.peek().ok_or_else(|| ReadError::UnexpectedEnd)?;
             if token.starts_with(']') {
                 self.0.next();
-                return Ok(Value::Vector(vec));
+                return Ok(Value::Vector(Rc::new(vec)));
             }
             vec.push(self.read_ignore_comment()?);
         }
@@ -86,7 +87,7 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
             let token = self.0.peek().ok_or_else(|| ReadError::UnexpectedEnd)?;
             if token.starts_with(end) {
                 self.0.next();
-                return Ok(Value::HashMap(map));
+                return Ok(Value::HashMap(Rc::new(map)));
             }
             let key = self.read_ignore_comment()?.try_into()?;
 
@@ -120,11 +121,14 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
     }
 
     fn read_read_macro(&mut self, rm: &str) -> ReadResult {
-        Ok(Value::List(
-            vec![Value::Symbol(rm.into()), self.read_ignore_comment()?]
-                .into_iter()
-                .collect(),
-        ))
+        Ok(Value::List(Rc::new(
+            vec![
+                Value::Symbol(Rc::new(rm.into())),
+                self.read_ignore_comment()?,
+            ]
+            .into_iter()
+            .collect(),
+        )))
     }
 
     fn read_atom(token: &str) -> ReadResult {
@@ -136,14 +140,14 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
                 if token.len() == 1 {
                     Err(ReadError::EmptyKeyword)
                 } else {
-                    Ok(Value::Keyword(token[1..].into()))
+                    Ok(Value::Keyword(Rc::new(token[1..].into())))
                 }
             }
             token if token.starts_with('"') => Self::read_string(token),
             token => token
                 .parse()
                 .map(Value::Number)
-                .or_else(|_| Ok(Value::Symbol(token.into()))),
+                .or_else(|_| Ok(Value::Symbol(Rc::new(token.into())))),
         }
     }
 
@@ -194,7 +198,7 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
                 }
             }
 
-            Ok(Value::String(result))
+            Ok(Value::String(Rc::new(result)))
         } else {
             Err(ReadError::UnterminatedString)
         }
