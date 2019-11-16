@@ -91,7 +91,7 @@ pub fn eval(mut ast: Value, mut env: Env) -> Result<Value, EvalError> {
                 Some(Value::Symbol(s)) if s.as_ref() == "do" => {
                     let mut iter = form.iter().skip(1);
                     for _ in 0..form.len().saturating_sub(2) {
-                        eval_ast(iter.next().unwrap().clone(), env.clone())?;
+                        eval(iter.next().unwrap().clone(), env.clone())?;
                     }
                     ast = iter.next().map(|e| e.clone()).unwrap_or_else(|| Value::Nil);
                 }
