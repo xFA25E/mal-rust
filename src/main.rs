@@ -6,6 +6,7 @@ mod reader;
 mod value;
 
 mod step6_file;
+use step6_file::eval;
 use step6_file::main as mmain;
 
 fn main() {

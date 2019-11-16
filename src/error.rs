@@ -1,6 +1,6 @@
 use std::{
     fmt::{self, Display},
-    io,
+    io::Error as IoError,
 };
 
 #[derive(Debug)]
@@ -34,6 +34,8 @@ pub enum EvalError {
     FormIsNotCallable,
     NumericOverflow,
     InvalidFnParameters,
+    Read(ReadError),
+    Io(IoError),
 }
 
 impl Display for EvalError {
@@ -45,41 +47,20 @@ impl Display for EvalError {
             Self::FormIsNotCallable => write!(f, "Form is not callable"),
             Self::NumericOverflow => write!(f, "Numeric overflow"),
             Self::InvalidFnParameters => write!(f, "Invalid function parameters"),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum MalError {
-    Eval(EvalError),
-    Read(ReadError),
-    Io(io::Error),
-}
-
-impl From<ReadError> for MalError {
-    fn from(source: ReadError) -> Self {
-        MalError::Read(source)
-    }
-}
-
-impl From<io::Error> for MalError {
-    fn from(source: io::Error) -> Self {
-        MalError::Io(source)
-    }
-}
-
-impl From<EvalError> for MalError {
-    fn from(source: EvalError) -> Self {
-        MalError::Eval(source)
-    }
-}
-
-impl Display for MalError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
             Self::Read(r) => write!(f, "{}", r),
             Self::Io(i) => write!(f, "{}", i),
-            Self::Eval(e) => write!(f, "{}", e),
         }
+    }
+}
+
+impl From<ReadError> for EvalError {
+    fn from(source: ReadError) -> Self {
+        Self::Read(source)
+    }
+}
+
+impl From<IoError> for EvalError {
+    fn from(source: IoError) -> Self {
+        Self::Io(source)
     }
 }

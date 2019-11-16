@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     clone::Clone,
     cmp::PartialEq,
     collections::{HashMap, VecDeque},
@@ -25,6 +26,7 @@ pub enum Value {
         body: Rc<Value>,
     },
     Comment,
+    Atom(Rc<RefCell<Value>>),
 }
 
 impl Value {
@@ -56,6 +58,7 @@ impl Clone for Value {
                 body: Rc::clone(body),
             },
             Self::Comment => Self::Comment,
+            Self::Atom(a) => Self::Atom(Rc::clone(a)),
         }
     }
 }
@@ -112,6 +115,10 @@ impl PartialEq for Value {
                 binds: _,
                 body: _,
             } => false,
+            Self::Atom(atom) => match other {
+                Self::Atom(o) => atom == o,
+                _ => false,
+            },
             Self::Comment => false,
         }
     }
@@ -147,6 +154,7 @@ impl Display for Value {
                 display_seq(l.iter(), f)?;
                 write!(f, ")")
             }
+            Self::Atom(a) => write!(f, "{}", a.borrow()),
             Self::Comment => Ok(()),
         }
     }

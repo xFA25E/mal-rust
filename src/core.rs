@@ -1,9 +1,101 @@
-use std::{collections::VecDeque, fmt::Write, rc::Rc};
+use std::{cell::RefCell, collections::VecDeque, fmt::Write, fs::read_to_string, rc::Rc};
 
-use crate::{error::EvalError, value::Value};
+use crate::{env::Env, error::EvalError, eval, reader::read, value::Value};
 
 pub type Args = Rc<VecDeque<Value>>;
 pub type EvalResult = Result<Value, EvalError>;
+
+pub fn swap(mut args: Args) -> EvalResult {
+    if args.len() >= 2 {
+        let args_ref = Rc::make_mut(&mut args);
+        match args_ref.pop_front().unwrap() {
+            Value::Atom(atom) => match args_ref.pop_front().unwrap() {
+                Value::Function(func) => {
+                    args_ref.push_front(atom.borrow().clone());
+                    let new_val = func(args)?;
+                    atom.replace(new_val.clone());
+                    Ok(new_val)
+                }
+
+                Value::Closure { env, binds, body } => {
+                    args_ref.push_front(atom.borrow().clone());
+
+                    if binds.len() != args.len() {
+                        match binds.get(binds.len() - 2).map(|s| s.as_str()) {
+                            Some("&") => (),
+                            _ => return Err(EvalError::InvalidNumberOfArguments),
+                        }
+                    }
+
+                    let closure_env = Env::new().env(env).binds(&binds, args).make();
+                    let new_val = eval(body.as_ref().clone(), closure_env)?;
+                    atom.replace(new_val.clone());
+                    Ok(new_val)
+                }
+
+                _ => Err(EvalError::InvalidArgumentType),
+            },
+            _ => Err(EvalError::InvalidArgumentType),
+        }
+    } else {
+        Err(EvalError::InvalidNumberOfArguments)
+    }
+}
+
+pub fn reset(args: Args) -> EvalResult {
+    if args.len() == 2 {
+        let mut iter = args.iter();
+        match iter.next().unwrap() {
+            Value::Atom(atom) => {
+                let value = iter.next().unwrap();
+                atom.replace(value.clone());
+                Ok(value.clone())
+            }
+            _ => Err(EvalError::InvalidArgumentType),
+        }
+    } else {
+        Err(EvalError::InvalidNumberOfArguments)
+    }
+}
+
+pub fn deref(args: Args) -> EvalResult {
+    match args.front() {
+        Some(Value::Atom(a)) => Ok(a.borrow().clone()),
+        Some(_) => Err(EvalError::InvalidArgumentType),
+        None => Err(EvalError::InvalidNumberOfArguments),
+    }
+}
+
+pub fn atomp(args: Args) -> EvalResult {
+    match args.front() {
+        Some(Value::Atom(_)) => Ok(Value::Bool(true)),
+        Some(_) => Err(EvalError::InvalidArgumentType),
+        None => Err(EvalError::InvalidNumberOfArguments),
+    }
+}
+
+pub fn atom(args: Args) -> EvalResult {
+    match args.front() {
+        Some(val) => Ok(Value::Atom(Rc::new(RefCell::new(val.clone())))),
+        None => Err(EvalError::InvalidNumberOfArguments),
+    }
+}
+
+pub fn read_string(args: Args) -> EvalResult {
+    match args.front() {
+        Some(Value::String(s)) => Ok(read(s)?),
+        Some(_) => Err(EvalError::InvalidArgumentType),
+        None => Err(EvalError::InvalidNumberOfArguments),
+    }
+}
+
+pub fn slurp(args: Args) -> EvalResult {
+    match args.front() {
+        Some(Value::String(s)) => Ok(Value::String(Rc::new(read_to_string(s.as_ref())?))),
+        Some(_) => Err(EvalError::InvalidArgumentType),
+        None => Err(EvalError::InvalidNumberOfArguments),
+    }
+}
 
 pub fn println(args: Args) -> EvalResult {
     let mut iter = args.iter();

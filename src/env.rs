@@ -33,6 +33,14 @@ impl Env {
         )
     }
 
+    pub fn most_outer(&self) -> Self {
+        if let Some(outer) = &self.0.outer {
+            outer.most_outer()
+        } else {
+            self.clone()
+        }
+    }
+
     pub fn set(&self, key: Rc<String>, value: Value) -> Value {
         self.0.data.borrow_mut().insert(key, value.clone());
         value
@@ -58,8 +66,9 @@ impl EnvBuilder {
 
     pub fn with_core(mut self) -> Self {
         use crate::core::{
-            add, count, divide, emptyp, equal, greater, greater_equal, less, less_equal, list,
-            listp, multiply, pr_str, println, prn, str, subtract, Args, EvalResult,
+            add, atom, atomp, count, deref, divide, emptyp, equal, greater, greater_equal, less,
+            less_equal, list, listp, multiply, pr_str, println, prn, read_string, reset, slurp,
+            str, subtract, swap, Args, EvalResult,
         };
 
         let funcs: &[(&str, fn(Args) -> EvalResult)] = &[
@@ -80,11 +89,23 @@ impl EnvBuilder {
             ("pr-str", pr_str),
             ("str", str),
             ("println", println),
+            ("read-string", read_string),
+            ("slurp", slurp),
+            ("swap!", swap),
+            ("reset!", reset),
+            ("deref", deref),
+            ("atom?", atomp),
+            ("atom", atom),
         ];
 
         for (n, f) in funcs {
             self.data.insert(Rc::new((*n).into()), Value::Function(*f));
         }
+
+        self.data.insert(
+            Rc::new("*ARGV*".into()),
+            Value::List(Rc::new(VecDeque::new())),
+        );
 
         self
     }
