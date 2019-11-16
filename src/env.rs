@@ -35,13 +35,8 @@ impl Env {
     }
 
     pub fn set(&self, key: Rc<String>, value: Value) -> Value {
-        match self.0.data.borrow_mut().entry(key) {
-            Entry::Occupied(mut o) => {
-                *o.get_mut() = value;
-                o.get().clone()
-            }
-            Entry::Vacant(v) => v.insert(value).clone(),
-        }
+        self.0.data.borrow_mut().insert(key, value.clone());
+        value
     }
 }
 

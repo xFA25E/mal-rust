@@ -9,3 +9,7 @@ edition = "2018"
 [dependencies]
 regex = "*"
 lazy_static = "*"
+
+[profile.release]
+lto = true
+codegen-units = 1
