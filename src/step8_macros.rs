@@ -18,6 +18,7 @@ pub fn main() -> std::io::Result<()> {
     let defs = &[
         "(def! not (fn* (a) (if a false true)))",
         "(def! load-file (fn* (f) (eval (read-string (str \"(do \" (slurp f) \"\\nnil)\")))))",
+        "(defmacro! cond (fn* (& xs) (if (> (count xs) 0) (list 'if (first xs) (if (> (count xs) 1) (nth xs 1) (throw \"odd number of forms to cond\")) (cons 'cond (rest (rest xs)))))))",
     ];
     for def in defs {
         rep(*def, repl_env.clone()).expect("eval bug: in core mal function");
@@ -66,8 +67,41 @@ pub fn main() -> std::io::Result<()> {
 
 pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
     loop {
+        match ast.clone() {
+            Value::List(_) => (),
+            other => return eval_ast(other, env.clone()),
+        }
+
+        ast = macroexpand(ast, env.clone())?;
+
         match ast {
             Value::List(form) => match form.front() {
+                Some(Value::Symbol(s)) if s.as_ref() == "defmacro!" => {
+                    return if form.len() == 3 {
+                        let mut form_iter = form.iter();
+                        form_iter.next();
+                        if let Value::Symbol(sym) = form_iter.next().unwrap() {
+                            let value = match eval(form_iter.next().unwrap().clone(), env.clone())?
+                            {
+                                Value::Closure {
+                                    env, binds, body, ..
+                                } => Value::Closure {
+                                    env,
+                                    binds,
+                                    body,
+                                    is_macro: true,
+                                },
+                                value => value,
+                            };
+                            Ok(env.set(Rc::clone(sym), value))
+                        } else {
+                            Err(EvalError::InvalidArgumentType)
+                        }
+                    } else {
+                        Err(EvalError::InvalidNumberOfArguments)
+                    };
+                }
+
                 Some(Value::Symbol(s)) if s.as_ref() == "def!" => {
                     return if form.len() == 3 {
                         let mut form_iter = form.iter();
@@ -209,6 +243,14 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
                     }
                 }
 
+                Some(Value::Symbol(ref s)) if s.as_ref() == "macroexpand" => {
+                    if form.len() == 2 {
+                        return macroexpand(form.get(1).unwrap().clone(), env.clone());
+                    } else {
+                        return Err(EvalError::InvalidNumberOfArguments);
+                    }
+                }
+
                 Some(Value::Symbol(_)) | Some(Value::List(_)) => {
                     match eval_ast(Value::List(form), env.clone())? {
                         Value::List(mut list) => {
@@ -229,8 +271,17 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
                                         }
                                     }
 
-                                    let closure_env =
-                                        Env::new().env(cenv.clone()).binds(&binds, list).make();
+                                    let closure_env = Env::new()
+                                        .env(cenv.clone())
+                                        .binds(
+                                            &binds,
+                                            Rc::new(
+                                                list.iter()
+                                                    .map(|e| eval(e.clone(), env.clone()))
+                                                    .collect::<Result<_, _>>()?,
+                                            ),
+                                        )
+                                        .make();
 
                                     ast = body.as_ref().clone();
                                     env = closure_env;
@@ -349,4 +400,37 @@ fn is_pair(ast: &Value) -> bool {
         Value::Vector(v) => !v.is_empty(),
         _ => false,
     }
+}
+
+fn macroexpand(mut ast: Value, env: Env) -> EvalResult {
+    loop {
+        if let Value::List(mut list) = ast.clone() {
+            if let Some(Value::Symbol(ref s)) = list.get(0) {
+                if let Some(Value::Closure {
+                    env: cenv,
+                    binds,
+                    body,
+                    is_macro: true,
+                }) = env.get(s)
+                {
+                    let list_ref = Rc::make_mut(&mut list);
+                    list_ref.pop_front();
+
+                    if binds.len() != list.len() {
+                        match binds.get(binds.len() - 2).map(|s| s.as_str()) {
+                            Some("&") => (),
+                            _ => return Err(EvalError::InvalidNumberOfArguments),
+                        }
+                    }
+
+                    let closure_env = Env::new().env(cenv.clone()).binds(&binds, list).make();
+
+                    ast = eval(body.as_ref().clone(), closure_env)?;
+                    continue;
+                }
+            }
+        }
+        break;
+    }
+    Ok(ast)
 }

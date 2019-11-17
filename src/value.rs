@@ -24,6 +24,7 @@ pub enum Value {
         env: Env,
         binds: Rc<Vec<Rc<String>>>,
         body: Rc<Value>,
+        is_macro: bool,
     },
     Comment,
     Atom(Rc<RefCell<Value>>),
@@ -52,10 +53,16 @@ impl Clone for Value {
             Self::Vector(v) => Self::Vector(Rc::clone(v)),
             Self::HashMap(h) => Self::HashMap(Rc::clone(h)),
             Self::Function(fp) => Self::Function(*fp),
-            Self::Closure { env, binds, body } => Self::Closure {
+            Self::Closure {
+                env,
+                binds,
+                body,
+                is_macro,
+            } => Self::Closure {
                 env: env.clone(),
                 binds: Rc::clone(binds),
                 body: Rc::clone(body),
+                is_macro: *is_macro,
             },
             Self::Comment => Self::Comment,
             Self::Atom(a) => Self::Atom(Rc::clone(a)),
@@ -110,11 +117,7 @@ impl PartialEq for Value {
                 Self::Function(o) => fn_ptr == o,
                 _ => false,
             },
-            Self::Closure {
-                env: _,
-                binds: _,
-                body: _,
-            } => false,
+            Self::Closure { .. } => false,
             Self::Atom(atom) => match other {
                 Self::Atom(o) => atom == o,
                 _ => false,
@@ -135,10 +138,17 @@ impl Display for Value {
             Self::String(s) => write!(f, "{}", s),
             Self::Function(func) => write!(f, "#<function {:?}>", func),
             Self::Closure {
-                env: _,
-                binds: _,
-                body: _,
-            } => write!(f, "#<closure>"),
+                binds,
+                body,
+                is_macro: false,
+                ..
+            } => write!(f, "#<closure {:?} {}>", binds, body),
+            Self::Closure {
+                binds,
+                body,
+                is_macro: true,
+                ..
+            } => write!(f, "#<macro {:?} {}>", binds, body),
             Self::HashMap(h) => {
                 write!(f, "{{")?;
                 display_seq(h.iter().map(HashKeyVal), f)?;

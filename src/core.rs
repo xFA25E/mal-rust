@@ -5,6 +5,98 @@ use crate::{env::Env, error::EvalError, eval, reader::read, value::Value};
 pub type Args = Rc<VecDeque<Value>>;
 pub type EvalResult = Result<Value, EvalError>;
 
+pub fn rest(args: Args) -> EvalResult {
+    match args.get(0).map(|c| c.clone()) {
+        Some(Value::List(mut l)) => {
+            let list_ref = Rc::make_mut(&mut l);
+            list_ref.pop_front();
+            Ok(Value::List(l))
+        }
+        Some(Value::Vector(v)) => {
+            if v.len() > 1 {
+                Ok(Value::List(Rc::new(
+                    v[1..].iter().map(|c| c.clone()).collect(),
+                )))
+            } else {
+                Ok(Value::List(Rc::new(VecDeque::new())))
+            }
+        }
+        Some(Value::Nil) => Ok(Value::List(Rc::new(VecDeque::new()))),
+        Some(_) => Err(EvalError::InvalidArgumentType),
+        None => Err(EvalError::InvalidNumberOfArguments),
+    }
+}
+
+pub fn first(args: Args) -> EvalResult {
+    match args.get(0) {
+        Some(Value::List(l)) => Ok(l.get(0).map(|c| c.clone()).unwrap_or_else(|| Value::Nil)),
+        Some(Value::Vector(v)) => Ok(v.get(0).map(|c| c.clone()).unwrap_or_else(|| Value::Nil)),
+        Some(Value::Nil) => Ok(Value::Nil),
+        Some(_) => Err(EvalError::InvalidArgumentType),
+        None => Err(EvalError::InvalidNumberOfArguments),
+    }
+}
+
+pub fn nth(args: Args) -> EvalResult {
+    if args.len() == 2 {
+        let mut iter = args.iter();
+        let seq = iter.next().unwrap();
+        match iter.next().unwrap() {
+            Value::Number(n) => match seq {
+                Value::List(l) => Ok(l.get(*n as usize).unwrap().clone()),
+                Value::Vector(v) => Ok(v.get(*n as usize).unwrap().clone()),
+                _ => Err(EvalError::InvalidArgumentType),
+            },
+            _ => Err(EvalError::InvalidArgumentType),
+        }
+    } else {
+        Err(EvalError::InvalidNumberOfArguments)
+    }
+}
+
+pub fn concat(args: Args) -> EvalResult {
+    let mut result = VecDeque::new();
+    for elm in args.iter() {
+        match elm {
+            Value::List(list) => {
+                for item in list.iter() {
+                    result.push_back(item.clone());
+                }
+            }
+            Value::Vector(vector) => {
+                for item in vector.iter() {
+                    result.push_back(item.clone());
+                }
+            }
+            _ => return Err(EvalError::InvalidArgumentType),
+        }
+    }
+    Ok(Value::List(Rc::new(result)))
+}
+
+pub fn cons(args: Args) -> EvalResult {
+    if args.len() >= 2 {
+        let mut iter = args.iter();
+        let elm = iter.next().unwrap();
+        match iter.next().unwrap() {
+            Value::List(list) => {
+                let mut list = list.clone();
+                let args_ref = Rc::make_mut(&mut list);
+                args_ref.push_front(elm.clone());
+                Ok(Value::List(list))
+            }
+            Value::Vector(vector) => {
+                let mut list: VecDeque<_> = vector.iter().map(|c| c.clone()).collect();
+                list.push_front(elm.clone());
+                Ok(Value::List(Rc::new(list)))
+            }
+            _ => Err(EvalError::InvalidArgumentType),
+        }
+    } else {
+        Err(EvalError::InvalidNumberOfArguments)
+    }
+}
+
 pub fn swap(mut args: Args) -> EvalResult {
     if args.len() >= 2 {
         let args_ref = Rc::make_mut(&mut args);
@@ -17,7 +109,9 @@ pub fn swap(mut args: Args) -> EvalResult {
                     Ok(new_val)
                 }
 
-                Value::Closure { env, binds, body } => {
+                Value::Closure {
+                    env, binds, body, ..
+                } => {
                     args_ref.push_front(atom.borrow().clone());
 
                     if binds.len() != args.len() {

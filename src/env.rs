@@ -66,9 +66,9 @@ impl EnvBuilder {
 
     pub fn with_core(mut self) -> Self {
         use crate::core::{
-            add, atom, atomp, count, deref, divide, emptyp, equal, greater, greater_equal, less,
-            less_equal, list, listp, multiply, pr_str, println, prn, read_string, reset, slurp,
-            str, subtract, swap, Args, EvalResult,
+            add, atom, atomp, concat, cons, count, deref, divide, emptyp, equal, first, greater,
+            greater_equal, less, less_equal, list, listp, multiply, nth, pr_str, println, prn,
+            read_string, reset, rest, slurp, str, subtract, swap, Args, EvalResult,
         };
 
         let funcs: &[(&str, fn(Args) -> EvalResult)] = &[
@@ -96,6 +96,11 @@ impl EnvBuilder {
             ("deref", deref),
             ("atom?", atomp),
             ("atom", atom),
+            ("cons", cons),
+            ("concat", concat),
+            ("first", first),
+            ("nth", nth),
+            ("rest", rest),
         ];
 
         for (n, f) in funcs {
