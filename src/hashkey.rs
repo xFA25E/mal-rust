@@ -77,3 +77,16 @@ impl TryFrom<Value> for LispHashKey {
         }
     }
 }
+
+impl From<LispHashKey> for Value {
+    fn from(source: LispHashKey) -> Self {
+        match source {
+            LispHashKey::Keyword(k) => Value::Keyword(k),
+            LispHashKey::String(s) => Value::String(s),
+            LispHashKey::Symbol(s) => Value::Symbol(s),
+            LispHashKey::Number(n) => Value::Number(n),
+            LispHashKey::Bool(b) => Value::Bool(b),
+            LispHashKey::Nil => Value::Nil,
+        }
+    }
+}

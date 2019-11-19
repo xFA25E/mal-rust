@@ -7,7 +7,12 @@ use std::{
     rc::Rc,
 };
 
-use crate::{env::Env, error::EvalError, hashkey::LispHashKey};
+use crate::{
+    core::EvalResult,
+    env::Env,
+    error::{EvalError, ReadError},
+    hashkey::LispHashKey,
+};
 
 pub enum Value {
     Nil,
@@ -19,7 +24,7 @@ pub enum Value {
     List(Rc<VecDeque<Value>>),
     Vector(Rc<Vec<Value>>),
     HashMap(Rc<HashMap<LispHashKey, Value>>),
-    Function(fn(Rc<VecDeque<Value>>) -> Result<Value, EvalError>),
+    Function(fn(Rc<VecDeque<Value>>) -> EvalResult),
     Closure {
         env: Env,
         binds: Rc<Vec<Rc<String>>>,
@@ -240,6 +245,21 @@ impl<'a> Display for HashKeyVal<'a> {
 impl<'a> Debug for HashKeyVal<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?} {:?}", (self.0).0, (self.0).1)
+    }
+}
+
+impl From<EvalError> for Value {
+    fn from(source: EvalError) -> Self {
+        match source {
+            EvalError::Exception(e) => e,
+            e => Value::String(Rc::new(e.to_string())),
+        }
+    }
+}
+
+impl From<ReadError> for Value {
+    fn from(source: ReadError) -> Self {
+        Value::String(Rc::new(source.to_string()))
     }
 }
 

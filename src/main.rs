@@ -5,9 +5,9 @@ mod hashkey;
 mod reader;
 mod value;
 
-mod step8_macros;
-use step8_macros::eval;
-use step8_macros::main as mmain;
+mod step9_try;
+use step9_try::eval;
+use step9_try::main as mmain;
 
 fn main() {
     let result = mmain();

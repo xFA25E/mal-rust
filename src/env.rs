@@ -66,9 +66,11 @@ impl EnvBuilder {
 
     pub fn with_core(mut self) -> Self {
         use crate::core::{
-            add, atom, atomp, concat, cons, count, deref, divide, emptyp, equal, first, greater,
-            greater_equal, less, less_equal, list, listp, multiply, nth, pr_str, println, prn,
-            read_string, reset, rest, slurp, str, subtract, swap, Args, EvalResult,
+            add, apply, assoc, atom, atomp, concat, cons, containsp, count, deref, dissoc, divide,
+            emptyp, equal, falsep, first, get, greater, greater_equal, hash_map, keys, keyword,
+            keywordp, less, less_equal, list, listp, map, mapp, multiply, nilp, nth, pr_str,
+            println, prn, read_string, reset, rest, sequentialp, slurp, str, subtract, swap,
+            symbol, symbolp, throw, truep, vals, vector, vectorp, Args, EvalResult,
         };
 
         let funcs: &[(&str, fn(Args) -> EvalResult)] = &[
@@ -101,6 +103,27 @@ impl EnvBuilder {
             ("first", first),
             ("nth", nth),
             ("rest", rest),
+            ("throw", throw),
+            ("map", map),
+            ("apply", apply),
+            ("nil?", nilp),
+            ("true?", truep),
+            ("false?", falsep),
+            ("symbol?", symbolp),
+            ("keys", keys),
+            ("vals", vals),
+            ("contains?", containsp),
+            ("get", get),
+            ("dissoc", dissoc),
+            ("assoc", assoc),
+            ("map?", mapp),
+            ("hash-map", hash_map),
+            ("sequential?", sequentialp),
+            ("vector?", vectorp),
+            ("vector", vector),
+            ("keyword", keyword),
+            ("keyword?", keywordp),
+            ("symbol", symbol),
         ];
 
         for (n, f) in funcs {

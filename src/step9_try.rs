@@ -6,7 +6,12 @@ use std::{
 };
 
 use crate::{
-    core::EvalResult, env::Env, error::EvalError, hashkey::LispHashKey, reader::read, value::Value,
+    core::{ensure_len, EvalResult},
+    env::Env,
+    error::EvalError,
+    hashkey::LispHashKey,
+    reader::read,
+    value::Value,
 };
 
 fn rep(s: &str, repl_env: Env) -> EvalResult {
@@ -77,177 +82,183 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
         match ast {
             Value::List(form) => match form.front() {
                 Some(Value::Symbol(s)) if s.as_ref() == "defmacro!" => {
-                    return if form.len() == 3 {
-                        let mut form_iter = form.iter();
-                        form_iter.next();
-                        if let Value::Symbol(sym) = form_iter.next().unwrap() {
-                            let value = match eval(form_iter.next().unwrap().clone(), env.clone())?
-                            {
-                                Value::Closure {
-                                    env, binds, body, ..
-                                } => Value::Closure {
-                                    env,
-                                    binds,
-                                    body,
-                                    is_macro: true,
-                                },
-                                value => value,
-                            };
-                            Ok(env.set(Rc::clone(sym), value))
-                        } else {
-                            Err(EvalError::InvalidArgumentType)
-                        }
+                    ensure_len(form.len() == 3)?;
+                    let mut form_iter = form.iter();
+                    form_iter.next();
+                    if let Value::Symbol(sym) = form_iter.next().unwrap() {
+                        let value = match eval(form_iter.next().unwrap().clone(), env.clone())? {
+                            Value::Closure {
+                                env, binds, body, ..
+                            } => Value::Closure {
+                                env,
+                                binds,
+                                body,
+                                is_macro: true,
+                            },
+                            value => value,
+                        };
+                        return Ok(env.set(Rc::clone(sym), value));
                     } else {
-                        Err(EvalError::InvalidNumberOfArguments)
-                    };
+                        return Err(EvalError::InvalidArgumentType.into());
+                    }
                 }
 
                 Some(Value::Symbol(s)) if s.as_ref() == "def!" => {
-                    return if form.len() == 3 {
-                        let mut form_iter = form.iter();
-                        form_iter.next();
-                        if let Value::Symbol(sym) = form_iter.next().unwrap() {
-                            Ok(env.set(
-                                Rc::clone(sym),
-                                eval(form_iter.next().unwrap().clone(), env.clone())?,
-                            ))
-                        } else {
-                            Err(EvalError::InvalidArgumentType)
-                        }
+                    ensure_len(form.len() == 3)?;
+                    let mut form_iter = form.iter();
+                    form_iter.next();
+                    if let Value::Symbol(sym) = form_iter.next().unwrap() {
+                        return Ok(env.set(
+                            Rc::clone(sym),
+                            eval(form_iter.next().unwrap().clone(), env.clone())?,
+                        ));
                     } else {
-                        Err(EvalError::InvalidNumberOfArguments)
-                    };
+                        return Err(EvalError::InvalidArgumentType.into());
+                    }
                 }
 
                 Some(Value::Symbol(s)) if s.as_ref() == "let*" => {
-                    if form.len() == 3 {
-                        let mut form_iter = form.iter();
-                        form_iter.next();
-                        let bindings = form_iter.next().unwrap();
-                        let body = form_iter.next().unwrap().clone();
+                    ensure_len(form.len() == 3)?;
 
-                        let new_env = match bindings {
-                            Value::List(binds) => {
-                                bind(binds.iter(), Env::new().env(env.clone()).make())
-                            }
-                            Value::Vector(binds) => {
-                                bind(binds.iter(), Env::new().env(env.clone()).make())
-                            }
-                            _ => Err(EvalError::InvalidArgumentType),
-                        }?;
+                    let mut form_iter = form.iter();
+                    form_iter.next();
+                    let bindings = form_iter.next().unwrap();
+                    let body = form_iter.next().unwrap().clone();
 
-                        env = new_env;
-                        ast = body;
-                    } else {
-                        return Err(EvalError::InvalidNumberOfArguments);
-                    }
+                    let new_env = match bindings {
+                        Value::List(binds) => {
+                            bind(binds.iter(), Env::new().env(env.clone()).make())
+                        }
+                        Value::Vector(binds) => {
+                            bind(binds.iter(), Env::new().env(env.clone()).make())
+                        }
+                        _ => Err(EvalError::InvalidArgumentType.into()),
+                    }?;
+
+                    env = new_env;
+                    ast = body;
                 }
 
                 Some(Value::Symbol(s)) if s.as_ref() == "do" => {
+                    ensure_len(form.len() > 1)?;
+
                     let mut iter = form.iter().skip(1);
-                    for _ in 0..form.len().saturating_sub(2) {
+                    for _ in 0..form.len() - 2 {
                         eval(iter.next().unwrap().clone(), env.clone())?;
                     }
-                    ast = iter.next().map(|e| e.clone()).unwrap_or_else(|| Value::Nil);
+                    ast = iter.next().unwrap().clone();
                 }
 
                 Some(Value::Symbol(ref s)) if s.as_ref() == "if" => {
-                    if form.len() == 3 || form.len() == 4 {
-                        let mut form_iter = form.iter();
-                        form_iter.next();
-                        let cond = form_iter.next().unwrap().clone();
-                        ast = match eval(cond, env.clone())? {
-                            Value::Nil | Value::Bool(false) => form_iter
-                                .nth(1)
-                                .map(|v| v.clone())
-                                .unwrap_or_else(|| Value::Nil),
-                            _ => form_iter.next().unwrap().clone(),
-                        };
-                    } else {
-                        return Err(EvalError::InvalidNumberOfArguments);
-                    }
-                }
+                    ensure_len(form.len() == 3 || form.len() == 4)?;
 
-                Some(Value::Symbol(ref s)) if s.as_ref() == "fn*" => {
-                    return if form.len() == 3 {
-                        let mut form_iter = form.iter();
-                        form_iter.next();
-
-                        let binds = match form_iter.next().unwrap() {
-                            Value::List(bs) => {
-                                let mut binds = Vec::with_capacity(bs.len());
-                                for bind in bs.iter() {
-                                    match bind {
-                                        Value::Symbol(s) => binds.push(s.clone()),
-                                        _ => return Err(EvalError::InvalidArgumentType),
-                                    }
-                                }
-                                binds
-                            }
-                            Value::Vector(bs) => {
-                                let mut binds = Vec::with_capacity(bs.len());
-                                for bind in bs.iter() {
-                                    match bind {
-                                        Value::Symbol(s) => binds.push(s.clone()),
-                                        _ => return Err(EvalError::InvalidArgumentType),
-                                    }
-                                }
-                                binds
-                            }
-                            _ => return Err(EvalError::InvalidArgumentType),
-                        };
-
-                        let mut pos_iter = binds.iter();
-                        if let Some(pos) = pos_iter.position(|p| p.as_ref() == "&") {
-                            if pos != binds.len() - 2 {
-                                return Err(EvalError::InvalidFnParameters);
-                            }
-                            if let Some("&") = pos_iter.next().map(|s| s.as_str()) {
-                                return Err(EvalError::InvalidFnParameters);
-                            }
-                        }
-
-                        Ok(Value::Closure {
-                            env,
-                            binds: Rc::new(binds),
-                            body: Rc::new(form_iter.next().unwrap().clone()),
-                            is_macro: false,
-                        })
-                    } else {
-                        Err(EvalError::InvalidNumberOfArguments)
+                    let mut form_iter = form.iter();
+                    form_iter.next();
+                    let cond = form_iter.next().unwrap().clone();
+                    ast = match eval(cond, env.clone())? {
+                        Value::Nil | Value::Bool(false) => form_iter
+                            .nth(1)
+                            .map(|v| v.clone())
+                            .unwrap_or_else(|| Value::Nil),
+                        _ => form_iter.next().unwrap().clone(),
                     };
                 }
 
-                Some(Value::Symbol(ref s)) if s.as_ref() == "eval" => {
-                    if form.len() == 2 {
-                        ast = eval(form.get(1).unwrap().clone(), env.clone())?;
-                        env = env.most_outer();
-                    } else {
-                        return Err(EvalError::InvalidNumberOfArguments);
+                Some(Value::Symbol(ref s)) if s.as_ref() == "fn*" => {
+                    ensure_len(form.len() == 3)?;
+
+                    let mut form_iter = form.iter();
+                    form_iter.next();
+
+                    let binds = match form_iter.next().unwrap() {
+                        Value::List(bs) => {
+                            let mut binds = Vec::with_capacity(bs.len());
+                            for bind in bs.iter() {
+                                match bind {
+                                    Value::Symbol(s) => binds.push(s.clone()),
+                                    _ => return Err(EvalError::InvalidArgumentType.into()),
+                                }
+                            }
+                            binds
+                        }
+                        Value::Vector(bs) => {
+                            let mut binds = Vec::with_capacity(bs.len());
+                            for bind in bs.iter() {
+                                match bind {
+                                    Value::Symbol(s) => binds.push(s.clone()),
+                                    _ => return Err(EvalError::InvalidArgumentType.into()),
+                                }
+                            }
+                            binds
+                        }
+                        _ => return Err(EvalError::InvalidArgumentType.into()),
+                    };
+
+                    let mut pos_iter = binds.iter();
+                    if let Some(pos) = pos_iter.position(|p| p.as_ref() == "&") {
+                        if pos != binds.len() - 2 {
+                            return Err(EvalError::InvalidFnParameters.into());
+                        }
+                        if let Some("&") = pos_iter.next().map(|s| s.as_str()) {
+                            return Err(EvalError::InvalidFnParameters.into());
+                        }
                     }
+
+                    return Ok(Value::Closure {
+                        env,
+                        binds: Rc::new(binds),
+                        body: Rc::new(form_iter.next().unwrap().clone()),
+                        is_macro: false,
+                    });
+                }
+
+                Some(Value::Symbol(ref s)) if s.as_ref() == "eval" => {
+                    ensure_len(form.len() == 2)?;
+                    ast = eval(form.get(1).unwrap().clone(), env.clone())?;
+                    env = env.most_outer();
                 }
 
                 Some(Value::Symbol(ref s)) if s.as_ref() == "quote" => {
-                    if form.len() == 2 {
-                        return Ok(form.get(1).unwrap().clone());
-                    } else {
-                        return Err(EvalError::InvalidNumberOfArguments);
-                    }
+                    ensure_len(form.len() == 2)?;
+                    return Ok(form.get(1).unwrap().clone());
                 }
 
                 Some(Value::Symbol(ref s)) if s.as_ref() == "quasiquote" => {
-                    if form.len() == 2 {
-                        ast = quasiquote(form.get(1).unwrap().clone());
-                    } else {
-                        return Err(EvalError::InvalidNumberOfArguments);
-                    }
+                    ensure_len(form.len() == 2)?;
+                    ast = quasiquote(form.get(1).unwrap().clone());
                 }
 
                 Some(Value::Symbol(ref s)) if s.as_ref() == "macroexpand" => {
-                    if form.len() == 2 {
-                        return macroexpand(form.get(1).unwrap().clone(), env.clone());
-                    } else {
-                        return Err(EvalError::InvalidNumberOfArguments);
+                    ensure_len(form.len() == 2)?;
+                    return macroexpand(form.get(1).unwrap().clone(), env);
+                }
+
+                Some(Value::Symbol(ref s)) if s.as_ref() == "try*" => {
+                    ensure_len(form.len() == 3)?;
+
+                    match eval(form.get(1).unwrap().clone(), env.clone()) {
+                        Err(e) => match form.get(2).unwrap() {
+                            Value::List(catch) => {
+                                ensure_len(catch.len() == 3)?;
+
+                                match catch.get(0).unwrap() {
+                                    Value::Symbol(s) if s.as_ref() == "catch*" => {
+                                        match catch.get(1).unwrap() {
+                                            Value::Symbol(bind) => {
+                                                let new_env = Env::new().env(env).make();
+                                                new_env.set(bind.clone(), e);
+                                                env = new_env;
+                                                ast = catch.get(2).unwrap().clone();
+                                            }
+                                            _ => return Err(EvalError::InvalidArgumentType.into()),
+                                        }
+                                    }
+                                    _ => return Err(EvalError::InvalidCatchBlock.into()),
+                                }
+                            }
+                            _ => return Err(EvalError::InvalidArgumentType.into()),
+                        },
+                        other => return other,
                     }
                 }
 
@@ -267,7 +278,11 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
                                     if binds.len() != list.len() {
                                         match binds.get(binds.len() - 2).map(|s| s.as_str()) {
                                             Some("&") => (),
-                                            _ => return Err(EvalError::InvalidNumberOfArguments),
+                                            _ => {
+                                                return Err(
+                                                    EvalError::InvalidNumberOfArguments.into()
+                                                )
+                                            }
                                         }
                                     }
 
@@ -287,14 +302,14 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
                                     env = closure_env;
                                 }
 
-                                _ => return Err(EvalError::FormIsNotCallable),
+                                _ => return Err(EvalError::FormIsNotCallable.into()),
                             }
                         }
                         _ => panic!("eval bug: expected list got something else"),
                     }
                 }
 
-                Some(_) => return Err(EvalError::FormIsNotCallable),
+                Some(_) => return Err(EvalError::FormIsNotCallable.into()),
                 None => return Ok(Value::List(form)),
             },
             other => return eval_ast(other, env),
@@ -304,30 +319,30 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
 
 fn eval_ast(ast: Value, env: Env) -> EvalResult {
     match ast {
-        Value::Symbol(s) => env.get(&s).ok_or_else(|| EvalError::SymbolNotFound),
+        Value::Symbol(s) => env.get(&s).ok_or_else(|| EvalError::SymbolNotFound.into()),
         Value::List(l) => Ok(Value::List(
             l.iter()
                 .map(|elm| eval(elm.clone(), env.clone()))
-                .collect::<Result<VecDeque<Value>, EvalError>>()
+                .collect::<Result<VecDeque<Value>, Value>>()
                 .map(Rc::new)?,
         )),
         Value::Vector(v) => Ok(Value::Vector(
             v.iter()
                 .map(|elm| eval(elm.clone(), env.clone()))
-                .collect::<Result<Vec<Value>, EvalError>>()
+                .collect::<Result<Vec<Value>, Value>>()
                 .map(Rc::new)?,
         )),
         Value::HashMap(h) => Ok(Value::HashMap(
             h.iter()
                 .map(|(k, v)| Ok((k.clone(), eval(v.clone(), env.clone())?)))
-                .collect::<Result<HashMap<LispHashKey, Value>, EvalError>>()
+                .collect::<Result<HashMap<LispHashKey, Value>, Value>>()
                 .map(Rc::new)?,
         )),
         other => Ok(other),
     }
 }
 
-fn bind<'a, I: Iterator<Item = &'a Value>>(mut i: I, env: Env) -> Result<Env, EvalError> {
+fn bind<'a, I: Iterator<Item = &'a Value>>(mut i: I, env: Env) -> Result<Env, Value> {
     while let Some(var) = i.next() {
         if let Value::Symbol(let_var) = var {
             let value = i.next();
@@ -335,7 +350,7 @@ fn bind<'a, I: Iterator<Item = &'a Value>>(mut i: I, env: Env) -> Result<Env, Ev
             let value = eval(value.clone(), env.clone())?;
             env.set(Rc::clone(let_var), value);
         } else {
-            return Err(EvalError::InvalidArgumentType);
+            return Err(EvalError::InvalidArgumentType.into());
         }
     }
 
@@ -419,7 +434,7 @@ fn macroexpand(mut ast: Value, env: Env) -> EvalResult {
                     if binds.len() != list.len() {
                         match binds.get(binds.len() - 2).map(|s| s.as_str()) {
                             Some("&") => (),
-                            _ => return Err(EvalError::InvalidNumberOfArguments),
+                            _ => return Err(EvalError::InvalidNumberOfArguments.into()),
                         }
                     }
 

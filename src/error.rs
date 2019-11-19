@@ -34,8 +34,10 @@ pub enum EvalError {
     FormIsNotCallable,
     NumericOverflow,
     InvalidFnParameters,
+    InvalidCatchBlock,
     Read(ReadError),
     Io(IoError),
+    Exception(crate::value::Value),
 }
 
 impl Display for EvalError {
@@ -49,6 +51,8 @@ impl Display for EvalError {
             Self::InvalidFnParameters => write!(f, "Invalid function parameters"),
             Self::Read(r) => write!(f, "{}", r),
             Self::Io(i) => write!(f, "{}", i),
+            Self::Exception(e) => write!(f, "Exception: {}", e),
+            Self::InvalidCatchBlock => write!(f, "Invalid catch block"),
         }
     }
 }
