@@ -1,8 +1,6 @@
-use std::{
-    cell::RefCell,
-    collections::{HashMap, VecDeque},
-    rc::Rc,
-};
+use im_rc::Vector;
+
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::value::Value;
 
@@ -22,23 +20,19 @@ impl Env {
     }
 
     pub fn get(&self, k: &Rc<String>) -> Option<Value> {
-        self.find(k)
-            .and_then(|env| env.0.data.borrow().get(k).map(|c| c.clone()))
-    }
-
-    fn find(&self, k: &Rc<String>) -> Option<Self> {
-        self.0.data.borrow().get(k).map_or_else(
-            || self.0.outer.as_ref().and_then(|e| e.find(k)),
-            |_| Some(Self(Rc::clone(&self.0))),
-        )
+        self.0
+            .data
+            .borrow()
+            .get(k)
+            .map(|c| c.clone())
+            .or_else(|| self.0.outer.as_ref().and_then(|e| e.get(k)))
     }
 
     pub fn most_outer(&self) -> Self {
-        if let Some(outer) = &self.0.outer {
-            outer.most_outer()
-        } else {
-            self.clone()
-        }
+        self.0
+            .outer
+            .as_ref()
+            .map_or_else(|| self.clone(), |o| o.most_outer())
     }
 
     pub fn set(&self, key: Rc<String>, value: Value) -> Value {
@@ -65,15 +59,18 @@ impl EnvBuilder {
     }
 
     pub fn with_core(mut self) -> Self {
-        use crate::core::{
-            add, apply, assoc, atom, atomp, concat, cons, containsp, count, deref, dissoc, divide,
-            emptyp, equal, falsep, first, get, greater, greater_equal, hash_map, keys, keyword,
-            keywordp, less, less_equal, list, listp, map, mapp, multiply, nilp, nth, pr_str,
-            println, prn, read_string, reset, rest, sequentialp, slurp, str, subtract, swap,
-            symbol, symbolp, throw, truep, vals, vector, vectorp, Args, EvalResult,
+        use crate::{
+            core::{
+                add, apply, assoc, atom, atomp, concat, cons, containsp, count, deref, dissoc,
+                divide, emptyp, equal, falsep, first, get, greater, greater_equal, hash_map, keys,
+                keyword, keywordp, less, less_equal, list, listp, map, mapp, multiply, nilp, nth,
+                pr_str, println, prn, read_string, reset, rest, sequentialp, slurp, str, subtract,
+                swap, symbol, symbolp, throw, truep, vals, vector, vectorp,
+            },
+            value::Function,
         };
 
-        let funcs: &[(&str, fn(Args) -> EvalResult)] = &[
+        let funcs: &[(&str, Function)] = &[
             ("+", add),
             ("-", subtract),
             ("*", multiply),
@@ -130,21 +127,19 @@ impl EnvBuilder {
             self.data.insert(Rc::new((*n).into()), Value::Function(*f));
         }
 
-        self.data.insert(
-            Rc::new("*ARGV*".into()),
-            Value::List(Rc::new(VecDeque::new())),
-        );
+        self.data
+            .insert(Rc::new("*ARGV*".into()), Value::List(Vector::new()));
 
         self
     }
 
-    pub fn binds(mut self, vars: &Vec<Rc<String>>, mut values: Rc<VecDeque<Value>>) -> Self {
+    pub fn binds(mut self, vars: &Vec<Rc<String>>, values: Vector<Value>) -> Self {
         let mut vars_iter = vars.iter();
-        let values_ref = Rc::make_mut(&mut values);
+        let mut values = values.clone();
 
         while let Some(s) = vars_iter.next() {
             if s.as_ref() != "&" {
-                let value = values_ref
+                let value = values
                     .pop_front()
                     .expect("eval bug: not enough arguments! Should check at before!");
 

@@ -1,17 +1,18 @@
+use im_rc::{HashMap, Vector};
+
 use std::{
-    collections::{HashMap, VecDeque},
     env::args,
     io::{stderr, stdin, stdout, BufRead, Write},
     rc::Rc,
 };
 
 use crate::{
-    core::{ensure_len, EvalResult},
+    core::ensure_len,
     env::Env,
     error as e,
-    hashkey::LispHashKey,
+    hashmapkey::HashMapKey,
     reader::read,
-    value::Value,
+    value::{EvalResult, Value},
 };
 
 fn rep(s: &str, repl_env: Env) -> EvalResult {
@@ -34,7 +35,7 @@ pub fn main() -> std::io::Result<()> {
     if let Some(file) = args.next() {
         repl_env.set(
             Rc::new("*ARGS*".into()),
-            Value::List(Rc::new(args.map(Rc::new).map(Value::String).collect())),
+            Value::List(args.map(Rc::new).map(Value::String).collect()),
         );
 
         match rep(&format!("(load-file \"{}\")", file), repl_env) {
@@ -263,10 +264,10 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
                 }
 
                 Some(Value::Symbol(_)) | Some(Value::List(_)) => {
-                    match eval_ast(Value::List(Rc::clone(&form)), env.clone())? {
-                        Value::List(mut list) => {
-                            let list_ref = Rc::make_mut(&mut list);
-                            match list_ref.pop_front().unwrap() {
+                    match eval_ast(Value::List(form.clone()), env.clone())? {
+                        Value::List(list) => {
+                            let mut list = list.clone();
+                            match list.pop_front().unwrap() {
                                 Value::Function(func) => return func(list),
 
                                 Value::Closure {
@@ -288,11 +289,9 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
                                         .env(cenv.clone())
                                         .binds(
                                             &binds,
-                                            Rc::new(
-                                                list.iter()
-                                                    .map(|e| eval(e.clone(), env.clone()))
-                                                    .collect::<Result<_, _>>()?,
-                                            ),
+                                            list.iter()
+                                                .map(|e| eval(e.clone(), env.clone()))
+                                                .collect::<Result<_, _>>()?,
                                         )
                                         .make();
 
@@ -317,28 +316,22 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
 
 fn eval_ast(ast: Value, env: Env) -> EvalResult {
     match ast {
-        Value::Symbol(s) => env
-            .get(&s)
-            .ok_or_else(|| ())
-            .or_else(|()| e::symbol_not_found(s)),
-        Value::List(l) => Ok(Value::List(
-            l.iter()
-                .map(|elm| eval(elm.clone(), env.clone()))
-                .collect::<Result<VecDeque<Value>, Value>>()
-                .map(Rc::new)?,
-        )),
-        Value::Vector(v) => Ok(Value::Vector(
-            v.iter()
-                .map(|elm| eval(elm.clone(), env.clone()))
-                .collect::<Result<Vec<Value>, Value>>()
-                .map(Rc::new)?,
-        )),
-        Value::HashMap(h) => Ok(Value::HashMap(
-            h.iter()
-                .map(|(k, v)| Ok((k.clone(), eval(v.clone(), env.clone())?)))
-                .collect::<Result<HashMap<LispHashKey, Value>, Value>>()
-                .map(Rc::new)?,
-        )),
+        Value::Symbol(s) => env.get(&s).ok_or_else(|| e::symbol_not_found(s)),
+        Value::List(l) => l
+            .iter()
+            .map(|elm| eval(elm.clone(), env.clone()))
+            .collect::<Result<Vector<Value>, Value>>()
+            .map(Value::List),
+        Value::Vector(v) => v
+            .iter()
+            .map(|elm| eval(elm.clone(), env.clone()))
+            .collect::<Result<Vector<Value>, Value>>()
+            .map(Value::Vector),
+        Value::HashMap(h) => h
+            .iter()
+            .map(|(k, v)| Ok((k.clone(), eval(v.clone(), env.clone())?)))
+            .collect::<Result<HashMap<HashMapKey, Value>, Value>>()
+            .map(Value::HashMap),
         other => Ok(other),
     }
 }
@@ -347,11 +340,11 @@ fn bind<'a, I: Iterator<Item = &'a Value>>(mut i: I, env: Env) -> Result<Env, Va
     let mut inx = 0;
     while let Some(var) = i.next() {
         if let Value::Symbol(let_var) = var {
-            let value = i.next();
-            let value = value
-                .ok_or_else(|| ())
-                .or_else(|()| e::arg_count("_", "_", "_"))?;
-            let value = eval(value.clone(), env.clone())?;
+            let value = match i.next() {
+                Some(value) => eval(value.clone(), env.clone())?,
+                None => return e::arg_count("_", "_", "_"),
+            };
+
             env.set(Rc::clone(let_var), value);
         } else {
             return e::arg_type("_", "symbol", inx * 2);
@@ -374,8 +367,8 @@ fn bind<'a, I: Iterator<Item = &'a Value>>(mut i: I, env: Env) -> Result<Env, Va
 fn quasiquote(ast: Value) -> Value {
     if is_pair(&ast) {
         let mut ast_iter: Box<dyn Iterator<Item = Value>> = match ast {
-            Value::List(l) => Box::new(l.as_ref().clone().into_iter()),
-            Value::Vector(v) => Box::new(v.as_ref().clone().into_iter()),
+            Value::List(l) => Box::new(l.clone().into_iter()),
+            Value::Vector(v) => Box::new(v.clone().into_iter()),
             _ => unreachable!(),
         };
 
@@ -384,33 +377,33 @@ fn quasiquote(ast: Value) -> Value {
             ast_first => {
                 if is_pair(&ast_first) {
                     let mut first_iter: Box<dyn Iterator<Item = Value>> = match ast_first.clone() {
-                        Value::List(l) => Box::new(l.as_ref().clone().into_iter()),
-                        Value::Vector(v) => Box::new(v.as_ref().clone().into_iter()),
+                        Value::List(l) => Box::new(l.clone().into_iter()),
+                        Value::Vector(v) => Box::new(v.clone().into_iter()),
                         _ => unreachable!(),
                     };
 
                     if let Value::Symbol(s) = first_iter.next().unwrap() {
                         if s.as_ref() == "splice-unquote" {
-                            let mut res = VecDeque::with_capacity(3);
+                            let mut res = Vector::new();
                             res.push_back(Value::Symbol(Rc::new("concat".into())));
                             res.push_back(first_iter.next().unwrap().clone());
-                            res.push_back(quasiquote(Value::List(Rc::new(ast_iter.collect()))));
-                            return Value::List(Rc::new(res));
+                            res.push_back(quasiquote(Value::List(ast_iter.collect())));
+                            return Value::List(res);
                         }
                     }
                 }
-                let mut res = VecDeque::with_capacity(3);
+                let mut res = Vector::new();
                 res.push_back(Value::Symbol(Rc::new("cons".into())));
                 res.push_back(quasiquote(ast_first));
-                res.push_back(quasiquote(Value::List(Rc::new(ast_iter.collect()))));
-                Value::List(Rc::new(res))
+                res.push_back(quasiquote(Value::List(ast_iter.collect())));
+                Value::List(res)
             }
         }
     } else {
-        let mut res = VecDeque::with_capacity(2);
+        let mut res = Vector::new();
         res.push_back(Value::Symbol(Rc::new("quote".into())));
         res.push_back(ast);
-        Value::List(Rc::new(res))
+        Value::List(res)
     }
 }
 
@@ -424,7 +417,7 @@ fn is_pair(ast: &Value) -> bool {
 
 fn macroexpand(mut ast: Value, env: Env) -> EvalResult {
     loop {
-        if let Value::List(mut list) = ast.clone() {
+        if let Value::List(list) = ast.clone() {
             if let Some(Value::Symbol(ref s)) = list.get(0) {
                 if let Some(Value::Closure {
                     env: cenv,
@@ -433,8 +426,8 @@ fn macroexpand(mut ast: Value, env: Env) -> EvalResult {
                     is_macro: true,
                 }) = env.get(s)
                 {
-                    let list_ref = Rc::make_mut(&mut list);
-                    list_ref.pop_front();
+                    let mut list = list.clone();
+                    list.pop_front();
 
                     if binds.len() != list.len() {
                         match binds.get(binds.len() - 2).map(|s| s.as_str()) {

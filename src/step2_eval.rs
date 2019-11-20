@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     reader::read_str,
-    types::{EvalError, LispHashKey, MalError, ReadError, Value},
+    types::{EvalError, HashMapKey, MalError, ReadError, Value},
 };
 
 type LispReplEnv = HashMap<String, Value>;
@@ -92,7 +92,7 @@ fn eval_ast(ast: Value, repl_env: &LispReplEnv) -> Result<Value, EvalError> {
         Value::HashMap(h) => Ok(Value::HashMap(
             h.into_iter()
                 .map(|(k, v)| Ok((k, eval(v, repl_env)?)))
-                .collect::<Result<HashMap<LispHashKey, Value>, EvalError>>()?,
+                .collect::<Result<HashMap<HashMapKey, Value>, EvalError>>()?,
         )),
         other => Ok(other),
     }

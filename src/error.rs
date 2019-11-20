@@ -3,11 +3,11 @@ use std::{fmt::Display, rc::Rc};
 use crate::value::Value;
 
 #[inline]
-pub fn unexpected_end<D: Display, OK>(expected: D) -> Result<OK, Value> {
-    Err(Value::String(Rc::new(format!(
+pub fn unexpected_end<D: Display>(expected: D) -> Value {
+    Value::String(Rc::new(format!(
         "Read ended unexpectedly. Expected \"{}\" somewhere",
         expected
-    ))))
+    )))
 }
 
 #[inline]
@@ -71,11 +71,11 @@ where
 }
 
 #[inline]
-pub fn symbol_not_found<OK, D: Display>(symbol: D) -> Result<OK, Value> {
-    Err(Value::String(Rc::new(format!(
+pub fn symbol_not_found<D: Display>(symbol: D) -> Value {
+    Value::String(Rc::new(format!(
         "It seems that symbol \"{}\" is undefined",
         symbol
-    ))))
+    )))
 }
 
 #[inline]

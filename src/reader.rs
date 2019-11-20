@@ -1,14 +1,13 @@
+use im_rc::{HashMap, Vector};
 use lazy_static::lazy_static;
 use regex::Regex;
 
-use std::{
-    collections::{HashMap, VecDeque},
-    convert::TryInto,
-    iter::Peekable,
-    rc::Rc,
-};
+use std::{convert::TryInto, iter::Peekable, rc::Rc};
 
-use crate::{core::EvalResult, error as e, value::Value};
+use crate::{
+    error as e,
+    value::{EvalResult, Value},
+};
 
 lazy_static! {
     static ref TOKEN_RE: Regex =
@@ -33,8 +32,7 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
         let token: &str = self
             .0
             .next()
-            .ok_or_else(|| ())
-            .or_else(|()| e::unexpected_end("something"))?;
+            .ok_or_else(|| e::unexpected_end("something"))?;
 
         match token {
             "'" => self.read_quote(),
@@ -59,34 +57,26 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
     }
 
     fn read_list(&mut self) -> EvalResult {
-        let mut list = VecDeque::new();
+        let mut list = Vector::new();
         loop {
-            let token = self
-                .0
-                .peek()
-                .ok_or_else(|| ())
-                .or_else(|()| e::unexpected_end(')'))?;
+            let token = self.0.peek().ok_or_else(|| e::unexpected_end(')'))?;
             if token.starts_with(')') {
                 self.0.next();
-                return Ok(Value::List(Rc::new(list)));
+                return Ok(Value::List(list));
             }
             list.push_back(self.read_ignore_comment()?);
         }
     }
 
     fn read_vector(&mut self) -> EvalResult {
-        let mut vec = Vec::new();
+        let mut vec = Vector::new();
         loop {
-            let token = self
-                .0
-                .peek()
-                .ok_or_else(|| ())
-                .or_else(|()| e::unexpected_end(']'))?;
+            let token = self.0.peek().ok_or_else(|| e::unexpected_end(']'))?;
             if token.starts_with(']') {
                 self.0.next();
-                return Ok(Value::Vector(Rc::new(vec)));
+                return Ok(Value::Vector(vec));
             }
-            vec.push(self.read_ignore_comment()?);
+            vec.push_back(self.read_ignore_comment()?);
         }
     }
 
@@ -94,22 +84,17 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
         let mut map = HashMap::new();
         let end = '}';
         loop {
-            let token = self
-                .0
-                .peek()
-                .ok_or_else(|| ())
-                .or_else(|()| e::unexpected_end('}'))?;
+            let token = self.0.peek().ok_or_else(|| e::unexpected_end('}'))?;
             if token.starts_with(end) {
                 self.0.next();
-                return Ok(Value::HashMap(Rc::new(map)));
+                return Ok(Value::HashMap(map));
             }
             let key = self.read_ignore_comment()?.try_into()?;
 
             let token = self
                 .0
                 .peek()
-                .ok_or_else(|| ())
-                .or_else(|()| e::unexpected_end("hash-map value"))?;
+                .ok_or_else(|| e::unexpected_end("hash-map value"))?;
             if token.starts_with(end) {
                 self.0.next();
                 return e::odd_hash_map_args();
@@ -139,14 +124,14 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
     }
 
     fn read_read_macro(&mut self, rm: &str) -> EvalResult {
-        Ok(Value::List(Rc::new(
+        Ok(Value::List(
             vec![
                 Value::Symbol(Rc::new(rm.into())),
                 self.read_ignore_comment()?,
             ]
             .into_iter()
             .collect(),
-        )))
+        ))
     }
 
     fn read_atom(token: &str) -> EvalResult {

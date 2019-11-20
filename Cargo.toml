@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 regex = "*"
 lazy_static = "*"
+im-rc = "*"
 
 [profile.release]
 lto = true

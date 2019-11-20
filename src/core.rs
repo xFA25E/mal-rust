@@ -1,24 +1,25 @@
+use im_rc::{HashMap, Vector};
+
 use std::{
     cell::RefCell,
-    collections::{HashMap, VecDeque},
     convert::TryInto,
     fmt::{Display, Write},
     fs::read_to_string,
     rc::Rc,
 };
 
-use crate::{env::Env, error as e, eval, reader::read, value::Value};
-
-pub type Args = Rc<VecDeque<Value>>;
-pub type EvalResult = Result<Value, Value>;
+use crate::{
+    env::Env,
+    error as e, eval,
+    reader::read,
+    value::{Args, EvalResult, Value},
+};
 
 pub fn keys(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "keys")?;
 
     match &args[0] {
-        Value::HashMap(h) => Ok(Value::List(Rc::new(
-            h.keys().map(|c| c.clone().into()).collect(),
-        ))),
+        Value::HashMap(h) => Ok(Value::List(h.keys().map(|c| c.clone().into()).collect())),
         _ => e::arg_type("assoc", "hash-map", 0),
     }
 }
@@ -27,9 +28,7 @@ pub fn vals(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "vals")?;
 
     match &args[0] {
-        Value::HashMap(h) => Ok(Value::List(Rc::new(
-            h.values().map(|c| c.clone()).collect(),
-        ))),
+        Value::HashMap(h) => Ok(Value::List(h.values().map(|c| c.clone()).collect())),
         _ => e::arg_type("assoc", "hash-map", 0),
     }
 }
@@ -59,16 +58,16 @@ pub fn get(args: Args) -> EvalResult {
 pub fn dissoc(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n >= 1, "1 or more", "dissoc")?;
 
-    let mut map = match &args[0] {
-        Value::HashMap(h) => h.clone(),
-        _ => return e::arg_type("assoc", "hash-map", 0),
-    };
-    let map_ref = Rc::make_mut(&mut map);
-
-    for key in args.iter().skip(1) {
-        map_ref.remove(&key.clone().try_into()?);
+    match &args[0] {
+        Value::HashMap(map) => {
+            let mut map = map.clone();
+            for key in args.iter().skip(1) {
+                map.remove(&key.clone().try_into()?);
+            }
+            Ok(Value::HashMap(map))
+        }
+        _ => e::arg_type("assoc", "hash-map", 0),
     }
-    Ok(Value::HashMap(map))
 }
 
 pub fn assoc(args: Args) -> EvalResult {
@@ -79,20 +78,18 @@ pub fn assoc(args: Args) -> EvalResult {
         "assoc",
     )?;
 
-    let mut map = match &args[0] {
-        Value::HashMap(h) => h.clone(),
-        _ => return e::arg_type("assoc", "hash-map", 0),
-    };
+    match &args[0] {
+        Value::HashMap(map) => {
+            let mut map = map.clone();
 
-    let map_ref = Rc::make_mut(&mut map);
+            for (k, v) in evens(args.iter().skip(1)).zip(odds(args.iter().skip(1))) {
+                map.insert(k.clone().try_into()?, v.clone());
+            }
 
-    let mut iter = args.iter().skip(1);
-    while let Some(key) = iter.next() {
-        let key = key.clone().try_into()?;
-        let value = iter.next().unwrap().clone();
-        map_ref.insert(key, value);
+            Ok(Value::HashMap(map))
+        }
+        _ => e::arg_type("assoc", "hash-map", 0),
     }
-    Ok(Value::HashMap(map))
 }
 
 pub fn mapp(args: Args) -> EvalResult {
@@ -107,20 +104,16 @@ pub fn mapp(args: Args) -> EvalResult {
 pub fn hash_map(args: Args) -> EvalResult {
     ensure_len(
         args.len(),
-        |n| n % 2 != 0,
-        "odd number of arguments",
+        |n| n % 2 == 0,
+        "even number of arguments",
         "hash-map",
     )?;
 
-    let mut iter = args.iter();
-    let mut map = HashMap::new();
-    while let Some(key) = iter.next() {
-        let key = key.clone().try_into()?;
-        let value = iter.next().unwrap().clone();
-        map.insert(key, value);
-    }
-
-    Ok(Value::HashMap(Rc::new(map)))
+    evens(args.iter())
+        .zip(odds(args.iter()))
+        .map(|(k, v)| Ok((k.clone().try_into()?, v.clone())))
+        .collect::<Result<HashMap<_, _>, _>>()
+        .map(Value::HashMap)
 }
 
 pub fn sequentialp(args: Args) -> EvalResult {
@@ -142,9 +135,7 @@ pub fn vectorp(args: Args) -> EvalResult {
 }
 
 pub fn vector(args: Args) -> EvalResult {
-    Ok(Value::Vector(Rc::new(
-        args.iter().map(|c| c.clone()).collect(),
-    )))
+    Ok(Value::Vector(args))
 }
 
 pub fn keyword(args: Args) -> EvalResult {
@@ -214,7 +205,7 @@ pub fn nilp(args: Args) -> EvalResult {
 pub fn apply(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n >= 1, "1 or more", "apply")?;
 
-    let mut f_args: VecDeque<_> = args
+    let mut f_args: Vector<_> = args
         .iter()
         .take(args.len().saturating_sub(1))
         .skip(1)
@@ -223,16 +214,7 @@ pub fn apply(args: Args) -> EvalResult {
 
     if args.len() > 1 {
         match args.back().unwrap() {
-            Value::List(l) => {
-                for elm in l.iter() {
-                    f_args.push_back(elm.clone());
-                }
-            }
-            Value::Vector(v) => {
-                for elm in v.iter() {
-                    f_args.push_back(elm.clone());
-                }
-            }
+            Value::List(v) | Value::Vector(v) => f_args.append(v.clone()),
             _ => return e::arg_type("apply", "list or vector", args.len() - 1),
         }
     }
@@ -247,13 +229,10 @@ pub fn apply(args: Args) -> EvalResult {
                 }
             }
 
-            let cenv = Env::new()
-                .env(env.clone())
-                .binds(&binds, Rc::new(f_args))
-                .make();
+            let cenv = Env::new().env(env.clone()).binds(&binds, f_args).make();
             eval(body.as_ref().clone(), cenv)
         }
-        Value::Function(func) => func(Rc::new(f_args)),
+        Value::Function(func) => func(f_args),
 
         _ => e::arg_type("apply", "function", 0),
     }
@@ -263,8 +242,7 @@ pub fn map(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 2, 2, "map")?;
 
     let iter: Box<dyn Iterator<Item = &Value>> = match args.get(1).unwrap() {
-        Value::List(l) => Box::new(l.iter()),
-        Value::Vector(v) => Box::new(v.iter()),
+        Value::List(v) | Value::Vector(v) => Box::new(v.iter()),
         _ => return e::arg_type("map", "list or vector", 1),
     };
 
@@ -276,32 +254,29 @@ pub fn map(args: Args) -> EvalResult {
                 return e::rest_parameter();
             }
 
-            Ok(Value::List(Rc::new(
+            Ok(Value::List(
                 iter.map(|c| {
                     let cenv = Env::new()
                         .env(env.clone())
-                        .binds(
-                            &binds,
-                            Rc::new({
-                                let mut list = VecDeque::with_capacity(1);
-                                list.push_back(c.clone());
-                                list
-                            }),
-                        )
+                        .binds(&binds, {
+                            let mut list = Vector::new();
+                            list.push_back(c.clone());
+                            list
+                        })
                         .make();
                     eval(body.as_ref().clone(), cenv)
                 })
                 .collect::<Result<_, _>>()?,
-            )))
+            ))
         }
-        Value::Function(func) => Ok(Value::List(Rc::new(
+        Value::Function(func) => Ok(Value::List(
             iter.map(|c| {
-                let mut list = VecDeque::with_capacity(1);
+                let mut list = Vector::new();
                 list.push_back(c.clone());
-                func(Rc::new(list))
+                func(list)
             })
             .collect::<Result<_, _>>()?,
-        ))),
+        )),
         _ => e::arg_type("map", "function", 0),
     }
 }
@@ -316,21 +291,12 @@ pub fn rest(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "rest")?;
 
     match args[0].clone() {
-        Value::List(mut l) => {
-            let list_ref = Rc::make_mut(&mut l);
-            list_ref.pop_front();
-            Ok(Value::List(l))
+        Value::List(v) | Value::Vector(v) => {
+            let mut v = v.clone();
+            v.pop_front();
+            Ok(Value::List(v))
         }
-        Value::Vector(v) => {
-            if v.len() > 1 {
-                Ok(Value::List(Rc::new(
-                    v[1..].iter().map(|c| c.clone()).collect(),
-                )))
-            } else {
-                Ok(Value::List(Rc::new(VecDeque::new())))
-            }
-        }
-        Value::Nil => Ok(Value::List(Rc::new(VecDeque::new()))),
+        Value::Nil => Ok(Value::List(Vector::new())),
         _ => e::arg_type("rest", "list, vector or nil", 0),
     }
 }
@@ -339,8 +305,9 @@ pub fn first(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "first")?;
 
     match &args[0] {
-        Value::List(l) => Ok(l.get(0).map(|c| c.clone()).unwrap_or_else(|| Value::Nil)),
-        Value::Vector(v) => Ok(v.get(0).map(|c| c.clone()).unwrap_or_else(|| Value::Nil)),
+        Value::List(v) | Value::Vector(v) => {
+            Ok(v.get(0).map(|c| c.clone()).unwrap_or_else(|| Value::Nil))
+        }
         Value::Nil => Ok(Value::Nil),
         _ => e::arg_type("first", "list, vector or nil", 0),
     }
@@ -353,11 +320,7 @@ pub fn nth(args: Args) -> EvalResult {
     let seq = iter.next().unwrap();
     match iter.next().unwrap() {
         Value::Number(n) => match seq {
-            Value::List(l) => l
-                .get(*n as usize)
-                .map(|e| e.clone())
-                .ok_or_else(|| Value::String(Rc::new("Index out of range".into()))),
-            Value::Vector(v) => v
+            Value::List(v) | Value::Vector(v) => v
                 .get(*n as usize)
                 .map(|e| e.clone())
                 .ok_or_else(|| Value::String(Rc::new("Index out of range".into()))),
@@ -368,15 +331,10 @@ pub fn nth(args: Args) -> EvalResult {
 }
 
 pub fn concat(args: Args) -> EvalResult {
-    let mut result = VecDeque::new();
+    let mut result = Vector::new();
     for (i, elm) in args.iter().enumerate() {
         match elm {
-            Value::List(list) => {
-                for item in list.iter() {
-                    result.push_back(item.clone());
-                }
-            }
-            Value::Vector(vector) => {
+            Value::List(vector) | Value::Vector(vector) => {
                 for item in vector.iter() {
                     result.push_back(item.clone());
                 }
@@ -384,7 +342,7 @@ pub fn concat(args: Args) -> EvalResult {
             _ => return e::arg_type("cons", "list or vector", i),
         }
     }
-    Ok(Value::List(Rc::new(result)))
+    Ok(Value::List(result))
 }
 
 pub fn cons(args: Args) -> EvalResult {
@@ -393,29 +351,23 @@ pub fn cons(args: Args) -> EvalResult {
     let mut iter = args.iter();
     let elm = iter.next().unwrap();
     match iter.next().unwrap() {
-        Value::List(list) => {
-            let mut list = list.clone();
-            let args_ref = Rc::make_mut(&mut list);
-            args_ref.push_front(elm.clone());
-            Ok(Value::List(list))
-        }
-        Value::Vector(vector) => {
-            let mut list: VecDeque<_> = vector.iter().map(|c| c.clone()).collect();
+        Value::List(vector) | Value::Vector(vector) => {
+            let mut list = vector.clone();
             list.push_front(elm.clone());
-            Ok(Value::List(Rc::new(list)))
+            Ok(Value::List(list))
         }
         _ => e::arg_type("cons", "list or vector", 1),
     }
 }
 
-pub fn swap(mut args: Args) -> EvalResult {
+pub fn swap(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n >= 2, "2 or more", "swap!")?;
 
-    let args_ref = Rc::make_mut(&mut args);
-    match args_ref.pop_front().unwrap() {
-        Value::Atom(atom) => match args_ref.pop_front().unwrap() {
+    let mut args = args.clone();
+    match args.pop_front().unwrap() {
+        Value::Atom(atom) => match args.pop_front().unwrap() {
             Value::Function(func) => {
-                args_ref.push_front(atom.borrow().clone());
+                args.push_front(atom.borrow().clone());
                 let new_val = func(args)?;
                 atom.replace(new_val.clone());
                 Ok(new_val)
@@ -424,7 +376,7 @@ pub fn swap(mut args: Args) -> EvalResult {
             Value::Closure {
                 env, binds, body, ..
             } => {
-                args_ref.push_front(atom.borrow().clone());
+                args.push_front(atom.borrow().clone());
 
                 if binds.len() != args.len() {
                     match binds.get(binds.len() - 2).map(|s| s.as_str()) {
@@ -563,8 +515,7 @@ pub fn emptyp(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "empty?")?;
 
     match &args[0] {
-        Value::List(l) => Ok(Value::Bool(l.is_empty())),
-        Value::Vector(v) => Ok(Value::Bool(v.is_empty())),
+        Value::List(v) | Value::Vector(v) => Ok(Value::Bool(v.is_empty())),
         _ => e::arg_type("empty?", "list or vector", 0),
     }
 }
@@ -573,8 +524,7 @@ pub fn count(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "count")?;
 
     match &args[0] {
-        Value::List(l) => Ok(Value::Number(l.len() as i128)),
-        Value::Vector(v) => Ok(Value::Number(v.len() as i128)),
+        Value::List(v) | Value::Vector(v) => Ok(Value::Number(v.len() as i128)),
         Value::Nil => Ok(Value::Number(0)),
         _ => e::arg_type("count", "list, vector or nil", 0),
     }
@@ -659,4 +609,14 @@ where
     } else {
         e::arg_count(name, required, provided)
     }
+}
+
+#[inline]
+fn odds<'a, I: Iterator<Item = &'a Value>>(i: I) -> impl Iterator<Item = &'a Value> {
+    i.enumerate().filter(|(i, _)| i % 2 != 0).map(|(_, v)| v)
+}
+
+#[inline]
+fn evens<'a, I: Iterator<Item = &'a Value>>(i: I) -> impl Iterator<Item = &'a Value> {
+    i.enumerate().filter(|(i, _)| i % 2 == 0).map(|(_, k)| k)
 }

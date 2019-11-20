@@ -1,7 +1,7 @@
 mod core;
 mod env;
 mod error;
-mod hashkey;
+mod hashmapkey;
 mod reader;
 mod value;
 

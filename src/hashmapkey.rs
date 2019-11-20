@@ -8,7 +8,7 @@ use std::{
 use crate::{error as e, value::Value};
 
 #[derive(PartialEq, Eq, Hash)]
-pub enum LispHashKey {
+pub enum HashMapKey {
     Keyword(Rc<String>),
     String(Rc<String>),
     Symbol(Rc<String>),
@@ -17,7 +17,7 @@ pub enum LispHashKey {
     Nil,
 }
 
-impl Clone for LispHashKey {
+impl Clone for HashMapKey {
     fn clone(&self) -> Self {
         match self {
             Self::Keyword(k) => Self::Keyword(Rc::clone(k)),
@@ -30,7 +30,7 @@ impl Clone for LispHashKey {
     }
 }
 
-impl Display for LispHashKey {
+impl Display for HashMapKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Keyword(k) => write!(f, ":{}", k),
@@ -43,7 +43,7 @@ impl Display for LispHashKey {
     }
 }
 
-impl Debug for LispHashKey {
+impl Debug for HashMapKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::String(s) => {
@@ -63,30 +63,30 @@ impl Debug for LispHashKey {
     }
 }
 
-impl TryFrom<Value> for LispHashKey {
+impl TryFrom<Value> for HashMapKey {
     type Error = Value;
     fn try_from(source: Value) -> Result<Self, Self::Error> {
         match source {
-            Value::Keyword(k) => Ok(LispHashKey::Keyword(k)),
-            Value::String(s) => Ok(LispHashKey::String(s)),
-            Value::Symbol(s) => Ok(LispHashKey::Symbol(s)),
-            Value::Number(n) => Ok(LispHashKey::Number(n)),
-            Value::Bool(b) => Ok(LispHashKey::Bool(b)),
-            Value::Nil => Ok(LispHashKey::Nil),
+            Value::Keyword(k) => Ok(HashMapKey::Keyword(k)),
+            Value::String(s) => Ok(HashMapKey::String(s)),
+            Value::Symbol(s) => Ok(HashMapKey::Symbol(s)),
+            Value::Number(n) => Ok(HashMapKey::Number(n)),
+            Value::Bool(b) => Ok(HashMapKey::Bool(b)),
+            Value::Nil => Ok(HashMapKey::Nil),
             provided => e::invalid_hash_key(provided),
         }
     }
 }
 
-impl From<LispHashKey> for Value {
-    fn from(source: LispHashKey) -> Self {
+impl From<HashMapKey> for Value {
+    fn from(source: HashMapKey) -> Self {
         match source {
-            LispHashKey::Keyword(k) => Value::Keyword(k),
-            LispHashKey::String(s) => Value::String(s),
-            LispHashKey::Symbol(s) => Value::Symbol(s),
-            LispHashKey::Number(n) => Value::Number(n),
-            LispHashKey::Bool(b) => Value::Bool(b),
-            LispHashKey::Nil => Value::Nil,
+            HashMapKey::Keyword(k) => Value::Keyword(k),
+            HashMapKey::String(s) => Value::String(s),
+            HashMapKey::Symbol(s) => Value::Symbol(s),
+            HashMapKey::Number(n) => Value::Number(n),
+            HashMapKey::Bool(b) => Value::Bool(b),
+            HashMapKey::Nil => Value::Nil,
         }
     }
 }

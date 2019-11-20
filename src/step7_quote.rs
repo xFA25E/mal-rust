@@ -6,7 +6,8 @@ use std::{
 };
 
 use crate::{
-    core::EvalResult, env::Env, error::EvalError, hashkey::LispHashKey, reader::read, value::Value,
+    core::EvalResult, env::Env, error::EvalError, hashmapkey::HashMapKey, reader::read,
+    value::Value,
 };
 
 fn rep(s: &str, repl_env: Env) -> EvalResult {
@@ -269,7 +270,7 @@ fn eval_ast(ast: Value, env: Env) -> EvalResult {
         Value::HashMap(h) => Ok(Value::HashMap(
             h.iter()
                 .map(|(k, v)| Ok((k.clone(), eval(v.clone(), env.clone())?)))
-                .collect::<Result<HashMap<LispHashKey, Value>, EvalError>>()
+                .collect::<Result<HashMap<HashMapKey, Value>, EvalError>>()
                 .map(Rc::new)?,
         )),
         other => Ok(other),

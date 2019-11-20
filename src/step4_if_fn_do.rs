@@ -7,7 +7,7 @@ use std::{
 use crate::{
     env::Env,
     error::{EvalError, MalError},
-    hashkey::LispHashKey,
+    hashmapkey::HashMapKey,
     reader::read,
     value::Value,
 };
@@ -215,7 +215,7 @@ fn eval_ast(ast: Value, env: Env) -> Result<Value, EvalError> {
         Value::HashMap(h) => Ok(Value::HashMap(
             h.iter()
                 .map(|(k, v)| Ok((k.clone(), eval(v.clone(), env.clone())?)))
-                .collect::<Result<HashMap<LispHashKey, Value>, EvalError>>()
+                .collect::<Result<HashMap<HashMapKey, Value>, EvalError>>()
                 .map(Rc::new)?,
         )),
         other => Ok(other),

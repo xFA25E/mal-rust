@@ -1,13 +1,18 @@
+use im_rc::{HashMap, Vector};
+
 use std::{
     cell::RefCell,
     clone::Clone,
     cmp::PartialEq,
-    collections::{HashMap, VecDeque},
     fmt::{self, Debug, Display},
     rc::Rc,
 };
 
-use crate::{core::EvalResult, env::Env, error as e, hashkey::LispHashKey};
+use crate::{env::Env, error as e, hashmapkey::HashMapKey};
+
+pub type Args = Vector<Value>;
+pub type EvalResult = Result<crate::value::Value, crate::value::Value>;
+pub type Function = fn(Args) -> EvalResult;
 
 pub enum Value {
     Nil,
@@ -16,10 +21,10 @@ pub enum Value {
     Symbol(Rc<String>),
     Keyword(Rc<String>),
     String(Rc<String>),
-    List(Rc<VecDeque<Value>>),
-    Vector(Rc<Vec<Value>>),
-    HashMap(Rc<HashMap<LispHashKey, Value>>),
-    Function(fn(Rc<VecDeque<Value>>) -> EvalResult),
+    List(Vector<Value>),
+    Vector(Vector<Value>),
+    HashMap(HashMap<HashMapKey, Value>),
+    Function(Function),
     Closure {
         env: Env,
         binds: Rc<Vec<Rc<String>>>,
@@ -52,9 +57,9 @@ impl Clone for Value {
             Self::Symbol(s) => Self::Symbol(Rc::clone(s)),
             Self::Keyword(s) => Self::Keyword(Rc::clone(s)),
             Self::String(s) => Self::String(Rc::clone(s)),
-            Self::List(l) => Self::List(Rc::clone(l)),
-            Self::Vector(v) => Self::Vector(Rc::clone(v)),
-            Self::HashMap(h) => Self::HashMap(Rc::clone(h)),
+            Self::List(l) => Self::List(l.clone()),
+            Self::Vector(v) => Self::Vector(v.clone()),
+            Self::HashMap(h) => Self::HashMap(h.clone()),
             Self::Function(fp) => Self::Function(*fp),
             Self::Closure {
                 env,
@@ -100,16 +105,8 @@ impl PartialEq for Value {
                 Self::String(o) => string == o,
                 _ => false,
             },
-            Self::List(list) => match other {
-                Self::List(o) => list == o,
-                Self::Vector(v) => list.as_ref() == v.as_ref(),
-                _ => false,
-            },
-            Self::Vector(vector) => match other {
-                Self::Vector(o) => vector == o,
-                Self::List(l) => {
-                    vector.len() == l.len() && vector.iter().zip(l.iter()).all(|(a, b)| a == b)
-                }
+            Self::List(list) | Self::Vector(list) => match other {
+                Self::List(vector) | Self::Vector(vector) => list == vector,
                 _ => false,
             },
             Self::HashMap(hash_map) => match other {
@@ -154,7 +151,7 @@ impl Display for Value {
             } => write!(f, "#<macro {:?} {}>", binds, body),
             Self::HashMap(h) => {
                 write!(f, "{{")?;
-                display_seq(h.iter().map(HashKeyVal), f)?;
+                display_seq(h.iter().map(HashMapKeyVal), f)?;
                 write!(f, "}}")
             }
             Self::Vector(v) => {
@@ -200,7 +197,7 @@ impl Debug for Value {
             }
             Self::HashMap(h) => {
                 write!(f, "{{")?;
-                debug_seq(h.iter().map(HashKeyVal), f)?;
+                debug_seq(h.iter().map(HashMapKeyVal), f)?;
                 write!(f, "}}")
             }
             other => write!(f, "{}", other),
@@ -232,15 +229,15 @@ fn debug_seq<P: Debug, I: Iterator<Item = P>>(mut i: I, f: &mut fmt::Formatter) 
     Ok(())
 }
 
-struct HashKeyVal<'a>((&'a LispHashKey, &'a Value));
+struct HashMapKeyVal<'a>(&'a (HashMapKey, Value));
 
-impl<'a> Display for HashKeyVal<'a> {
+impl<'a> Display for HashMapKeyVal<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} {}", (self.0).0, (self.0).1)
     }
 }
 
-impl<'a> Debug for HashKeyVal<'a> {
+impl<'a> Debug for HashMapKeyVal<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?} {:?}", (self.0).0, (self.0).1)
     }
