@@ -1,70 +1,120 @@
-use std::{
-    fmt::{self, Display},
-    io::Error as IoError,
-};
+use std::{fmt::Display, rc::Rc};
 
-#[derive(Debug)]
-pub enum ReadError {
-    UnexpectedEnd,
-    UnterminatedString,
-    EmptyKeyword,
-    UnterminatedHashMapKey,
-    InvalidHashKey,
+use crate::value::Value;
+
+#[inline]
+pub fn unexpected_end<D: Display, OK>(expected: D) -> Result<OK, Value> {
+    Err(Value::String(Rc::new(format!(
+        "Read ended unexpectedly. Expected \"{}\" somewhere",
+        expected
+    ))))
 }
 
-impl Display for ReadError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::UnexpectedEnd => write!(f, "Read ended unexpectedly"),
-            Self::UnterminatedString => write!(f, "Could not find string terminator"),
-            Self::EmptyKeyword => write!(f, "Empty keyword"),
-            Self::InvalidHashKey => write!(f, "Invalid hash key"),
-            Self::UnterminatedHashMapKey => {
-                write!(f, "One of the hash map keys does not have any value")
-            }
-        }
-    }
+#[inline]
+pub fn unterminated_string<OK>() -> Result<OK, Value> {
+    Err(Value::String(Rc::new(
+        "String is not terminated with \"".into(),
+    )))
 }
 
-#[derive(Debug)]
-pub enum EvalError {
-    InvalidArgumentType,
-    InvalidNumberOfArguments,
-    SymbolNotFound,
-    FormIsNotCallable,
-    NumericOverflow,
-    InvalidFnParameters,
-    InvalidCatchBlock,
-    Read(ReadError),
-    Io(IoError),
-    Exception(crate::value::Value),
+#[inline]
+pub fn empty_keyword<OK>() -> Result<OK, Value> {
+    Err(Value::String(Rc::new(
+        "Found an empty keyword (just a colon \":\")".into(),
+    )))
 }
 
-impl Display for EvalError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::InvalidArgumentType => write!(f, "Invalid argument type"),
-            Self::InvalidNumberOfArguments => write!(f, "Invalid number of argumnts"),
-            Self::SymbolNotFound => write!(f, "Symbol not found"),
-            Self::FormIsNotCallable => write!(f, "Form is not callable"),
-            Self::NumericOverflow => write!(f, "Numeric overflow"),
-            Self::InvalidFnParameters => write!(f, "Invalid function parameters"),
-            Self::Read(r) => write!(f, "{}", r),
-            Self::Io(i) => write!(f, "{}", i),
-            Self::Exception(e) => write!(f, "Exception: {}", e),
-            Self::InvalidCatchBlock => write!(f, "Invalid catch block"),
-        }
-    }
+#[inline]
+pub fn invalid_hash_key<D: Display, OK>(provided: D) -> Result<OK, Value> {
+    Err(Value::String(Rc::new(format!(
+        "Can't use \"{}\" as a hash-map key.\n\
+         Possible hash-map keys:\n\
+         keywords, strings, symbols, numbers, booleans, nil",
+        provided
+    ))))
 }
 
-impl From<ReadError> for EvalError {
-    fn from(source: ReadError) -> Self {
-        Self::Read(source)
-    }
+#[inline]
+pub fn odd_hash_map_args<OK>() -> Result<OK, Value> {
+    Err(Value::String(Rc::new(
+        "Number of hash-map arguments is not even.\n\
+         One of the keys does not have any value"
+            .into(),
+    )))
 }
 
-impl From<IoError> for EvalError {
-    fn from(source: IoError) -> Self {
-        Self::Io(source)
-    }
+#[inline]
+pub fn arg_type<OK, F, D, N>(func: F, arg_type: D, pos: N) -> Result<OK, Value>
+where
+    F: Display,
+    D: Display,
+    N: Display,
+{
+    Err(Value::String(Rc::new(format!(
+        "Provided argument type to \"{}\" at position {}, is not valid.\n\
+         Expected \"{}\"",
+        func, arg_type, pos
+    ))))
+}
+
+#[inline]
+pub fn arg_count<OK, D, S, N>(func: D, required: S, provided: N) -> Result<OK, Value>
+where
+    D: Display,
+    S: Display,
+    N: Display,
+{
+    Err(Value::String(Rc::new(format!(
+        "{}: invalid number of arguments. Required: {}. Provided: {}",
+        func, required, provided
+    ))))
+}
+
+#[inline]
+pub fn symbol_not_found<OK, D: Display>(symbol: D) -> Result<OK, Value> {
+    Err(Value::String(Rc::new(format!(
+        "It seems that symbol \"{}\" is undefined",
+        symbol
+    ))))
+}
+
+#[inline]
+pub fn not_function<OK, D: Display>(element: D) -> Result<OK, Value> {
+    Err(Value::String(Rc::new(format!(
+        "\"{}\" is not a function",
+        element
+    ))))
+}
+
+#[inline]
+pub fn rest_parameter<OK>() -> Result<OK, Value> {
+    Err(Value::String(Rc::new(
+        "Invalid rest-parameter (&) syntax in \"fn*\".\n\
+         \"&\" should be in the penultimate position"
+            .into(),
+    )))
+}
+
+#[inline]
+pub fn catch_block<OK>() -> Result<OK, Value> {
+    Err(Value::String(Rc::new(
+        "Invalid catch block. Expected \"catch*\" symbol".into(),
+    )))
+}
+
+#[inline]
+pub fn io<OK, D: Display>(error: D) -> Result<OK, Value> {
+    Err(Value::String(Rc::new(format!("Io error: {}", error))))
+}
+
+#[inline]
+pub fn numeric_overflow<D, N>(func: D, first: N, second: N) -> Value
+where
+    D: Display,
+    N: Display,
+{
+    Value::String(Rc::new(format!(
+        "Encountered numeric overflow in \"{}\". Arguments: {}, {}",
+        func, first, second
+    )))
 }

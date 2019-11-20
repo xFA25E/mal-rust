@@ -5,7 +5,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::{error::ReadError, value::Value};
+use crate::{error as e, value::Value};
 
 #[derive(PartialEq, Eq, Hash)]
 pub enum LispHashKey {
@@ -64,7 +64,7 @@ impl Debug for LispHashKey {
 }
 
 impl TryFrom<Value> for LispHashKey {
-    type Error = ReadError;
+    type Error = Value;
     fn try_from(source: Value) -> Result<Self, Self::Error> {
         match source {
             Value::Keyword(k) => Ok(LispHashKey::Keyword(k)),
@@ -73,7 +73,7 @@ impl TryFrom<Value> for LispHashKey {
             Value::Number(n) => Ok(LispHashKey::Number(n)),
             Value::Bool(b) => Ok(LispHashKey::Bool(b)),
             Value::Nil => Ok(LispHashKey::Nil),
-            _ => Err(ReadError::InvalidHashKey),
+            provided => e::invalid_hash_key(provided),
         }
     }
 }

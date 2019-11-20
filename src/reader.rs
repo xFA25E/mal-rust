@@ -8,7 +8,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::{error::ReadError, value::Value};
+use crate::{core::EvalResult, error as e, value::Value};
 
 lazy_static! {
     static ref TOKEN_RE: Regex =
@@ -16,7 +16,7 @@ lazy_static! {
             .unwrap();
 }
 
-pub fn read(s: &str) -> ReadResult {
+pub fn read(s: &str) -> EvalResult {
     Reader(
         TOKEN_RE
             .captures_iter(s)
@@ -26,13 +26,15 @@ pub fn read(s: &str) -> ReadResult {
     .read()
 }
 
-type ReadResult = Result<Value, ReadError>;
-
 struct Reader<'s, I: Iterator<Item = &'s str>>(Peekable<I>);
 
 impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
-    fn read(&mut self) -> ReadResult {
-        let token: &str = self.0.next().ok_or_else(|| ReadError::UnexpectedEnd)?;
+    fn read(&mut self) -> EvalResult {
+        let token: &str = self
+            .0
+            .next()
+            .ok_or_else(|| ())
+            .or_else(|()| e::unexpected_end("something"))?;
 
         match token {
             "'" => self.read_quote(),
@@ -48,7 +50,7 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
         }
     }
 
-    fn read_ignore_comment(&mut self) -> ReadResult {
+    fn read_ignore_comment(&mut self) -> EvalResult {
         let mut value = self.read()?;
         while let Value::Comment = value {
             value = self.read()?;
@@ -56,10 +58,14 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
         Ok(value)
     }
 
-    fn read_list(&mut self) -> ReadResult {
+    fn read_list(&mut self) -> EvalResult {
         let mut list = VecDeque::new();
         loop {
-            let token = self.0.peek().ok_or_else(|| ReadError::UnexpectedEnd)?;
+            let token = self
+                .0
+                .peek()
+                .ok_or_else(|| ())
+                .or_else(|()| e::unexpected_end(')'))?;
             if token.starts_with(')') {
                 self.0.next();
                 return Ok(Value::List(Rc::new(list)));
@@ -68,10 +74,14 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
         }
     }
 
-    fn read_vector(&mut self) -> ReadResult {
+    fn read_vector(&mut self) -> EvalResult {
         let mut vec = Vec::new();
         loop {
-            let token = self.0.peek().ok_or_else(|| ReadError::UnexpectedEnd)?;
+            let token = self
+                .0
+                .peek()
+                .ok_or_else(|| ())
+                .or_else(|()| e::unexpected_end(']'))?;
             if token.starts_with(']') {
                 self.0.next();
                 return Ok(Value::Vector(Rc::new(vec)));
@@ -80,47 +90,55 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
         }
     }
 
-    fn read_hash_map(&mut self) -> ReadResult {
+    fn read_hash_map(&mut self) -> EvalResult {
         let mut map = HashMap::new();
         let end = '}';
         loop {
-            let token = self.0.peek().ok_or_else(|| ReadError::UnexpectedEnd)?;
+            let token = self
+                .0
+                .peek()
+                .ok_or_else(|| ())
+                .or_else(|()| e::unexpected_end('}'))?;
             if token.starts_with(end) {
                 self.0.next();
                 return Ok(Value::HashMap(Rc::new(map)));
             }
             let key = self.read_ignore_comment()?.try_into()?;
 
-            let token = self.0.peek().ok_or_else(|| ReadError::UnexpectedEnd)?;
+            let token = self
+                .0
+                .peek()
+                .ok_or_else(|| ())
+                .or_else(|()| e::unexpected_end("hash-map value"))?;
             if token.starts_with(end) {
                 self.0.next();
-                return Err(ReadError::UnterminatedHashMapKey);
+                return e::odd_hash_map_args();
             }
             map.insert(key, self.read_ignore_comment()?);
         }
     }
 
-    fn read_quote(&mut self) -> ReadResult {
+    fn read_quote(&mut self) -> EvalResult {
         self.read_read_macro("quote")
     }
 
-    fn read_quasiquote(&mut self) -> ReadResult {
+    fn read_quasiquote(&mut self) -> EvalResult {
         self.read_read_macro("quasiquote")
     }
 
-    fn read_unquote(&mut self) -> ReadResult {
+    fn read_unquote(&mut self) -> EvalResult {
         self.read_read_macro("unquote")
     }
 
-    fn read_splice_unquote(&mut self) -> ReadResult {
+    fn read_splice_unquote(&mut self) -> EvalResult {
         self.read_read_macro("splice-unquote")
     }
 
-    fn read_deref(&mut self) -> ReadResult {
+    fn read_deref(&mut self) -> EvalResult {
         self.read_read_macro("deref")
     }
 
-    fn read_read_macro(&mut self, rm: &str) -> ReadResult {
+    fn read_read_macro(&mut self, rm: &str) -> EvalResult {
         Ok(Value::List(Rc::new(
             vec![
                 Value::Symbol(Rc::new(rm.into())),
@@ -131,14 +149,14 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
         )))
     }
 
-    fn read_atom(token: &str) -> ReadResult {
+    fn read_atom(token: &str) -> EvalResult {
         match token {
             "nil" => Ok(Value::Nil),
             "true" => Ok(Value::Bool(true)),
             "false" => Ok(Value::Bool(false)),
             token if token.starts_with(':') => {
                 if token.len() == 1 {
-                    Err(ReadError::EmptyKeyword)
+                    e::empty_keyword()
                 } else {
                     Ok(Value::Keyword(Rc::new(token[1..].into())))
                 }
@@ -151,7 +169,7 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
         }
     }
 
-    fn read_string(token: &str) -> Result<Value, ReadError> {
+    fn read_string(token: &str) -> EvalResult {
         if token.ends_with('"') {
             let length = token.chars().count();
             let mut result = String::new();
@@ -160,7 +178,7 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
 
             for char in token.chars().skip(1).take(length - 2) {
                 if should_end {
-                    return Err(ReadError::UnterminatedString);
+                    return e::unterminated_string();
                 }
 
                 match char {
@@ -200,7 +218,7 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
 
             Ok(Value::String(Rc::new(result)))
         } else {
-            Err(ReadError::UnterminatedString)
+            e::unterminated_string()
         }
     }
 }
