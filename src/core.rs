@@ -1,11 +1,9 @@
-use im_rc::{HashMap, Vector};
+use im_rc::{vector, Vector};
 
 use std::{
-    cell::RefCell,
     convert::TryInto,
     fmt::{Display, Write},
     fs::read_to_string,
-    rc::Rc,
 };
 
 use crate::{
@@ -18,56 +16,62 @@ use crate::{
 pub fn keys(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "keys")?;
 
-    match &args[0] {
-        Value::HashMap(h) => Ok(Value::List(h.keys().map(|c| c.clone().into()).collect())),
-        _ => e::arg_type("assoc", "hash-map", 0),
-    }
+    args[0]
+        .hashmap()
+        .map(|h| Value::List(h.keys().map(Clone::clone).map(Value::from).collect()))
+        .ok_or_else(|| e::arg_type("assoc", "hash-map", 0))
 }
 
 pub fn vals(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "vals")?;
 
-    match &args[0] {
-        Value::HashMap(h) => Ok(Value::List(h.values().map(|c| c.clone()).collect())),
-        _ => e::arg_type("assoc", "hash-map", 0),
-    }
+    args[0]
+        .hashmap()
+        .map(|h| Value::List(h.values().map(Clone::clone).collect()))
+        .ok_or_else(|| e::arg_type("assoc", "hash-map", 0))
 }
 
 pub fn containsp(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 2, 2, "contains?")?;
 
-    match &args[0] {
-        Value::HashMap(h) => Ok(Value::Bool(h.contains_key(&args[1].clone().try_into()?))),
-        _ => e::arg_type("assoc", "hash-map", 0),
-    }
+    let mut args = args.iter();
+
+    Ok(Value::Bool(
+        args.next()
+            .and_then(Value::hashmap)
+            .ok_or_else(|| e::arg_type("assoc", "hash-map", 0))?
+            .contains_key(&args.next().unwrap().clone().try_into()?),
+    ))
 }
 
 pub fn get(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 2, 2, "get")?;
 
-    match &args[0] {
-        Value::HashMap(h) => Ok(h
-            .get(&args[1].clone().try_into()?)
-            .map(|c| c.clone())
-            .unwrap_or_else(|| Value::Nil)),
+    let mut args = args.iter();
+
+    match args.next().unwrap() {
         Value::Nil => Ok(Value::Nil),
-        _ => e::arg_type("assoc", "hash-map or nil", 0),
+        other => Ok(other
+            .hashmap()
+            .ok_or_else(|| e::arg_type("assoc", "hash-map or nil", 0))?
+            .get(&args.next().unwrap().clone().try_into()?)
+            .map_or_else(|| Value::Nil, Clone::clone)),
     }
 }
 
 pub fn dissoc(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n >= 1, "1 or more", "dissoc")?;
 
-    match &args[0] {
-        Value::HashMap(map) => {
-            let mut map = map.clone();
-            for key in args.iter().skip(1) {
-                map.remove(&key.clone().try_into()?);
-            }
-            Ok(Value::HashMap(map))
-        }
-        _ => e::arg_type("assoc", "hash-map", 0),
+    let mut map = args[0]
+        .hashmap()
+        .ok_or_else(|| e::arg_type("assoc", "hash-map", 0))?
+        .clone();
+
+    for key in args.iter().skip(1) {
+        map.remove(&key.clone().try_into()?);
     }
+
+    Ok(Value::HashMap(map))
 }
 
 pub fn assoc(args: Args) -> EvalResult {
@@ -78,27 +82,22 @@ pub fn assoc(args: Args) -> EvalResult {
         "assoc",
     )?;
 
-    match &args[0] {
-        Value::HashMap(map) => {
-            let mut map = map.clone();
+    let mut map = args[0]
+        .hashmap()
+        .ok_or_else(|| e::arg_type("assoc", "hash-map", 0))?
+        .clone();
 
-            for (k, v) in evens(args.iter().skip(1)).zip(odds(args.iter().skip(1))) {
-                map.insert(k.clone().try_into()?, v.clone());
-            }
-
-            Ok(Value::HashMap(map))
-        }
-        _ => e::arg_type("assoc", "hash-map", 0),
+    for (k, v) in Pairs(args.iter().skip(1)) {
+        map.insert(k.clone().try_into()?, v.clone());
     }
+
+    Ok(Value::HashMap(map))
 }
 
 pub fn mapp(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "map?")?;
 
-    match args[0] {
-        Value::HashMap(_) => Ok(Value::Bool(true)),
-        _ => Ok(Value::Bool(false)),
-    }
+    Ok(Value::Bool(args[0].hashmap().is_some()))
 }
 
 pub fn hash_map(args: Args) -> EvalResult {
@@ -109,29 +108,22 @@ pub fn hash_map(args: Args) -> EvalResult {
         "hash-map",
     )?;
 
-    evens(args.iter())
-        .zip(odds(args.iter()))
+    Pairs(args.iter())
         .map(|(k, v)| Ok((k.clone().try_into()?, v.clone())))
-        .collect::<Result<HashMap<_, _>, _>>()
+        .collect::<Result<_, _>>()
         .map(Value::HashMap)
 }
 
 pub fn sequentialp(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "sequential?")?;
 
-    match args[0] {
-        Value::Vector(_) | Value::List(_) => Ok(Value::Bool(true)),
-        _ => Ok(Value::Bool(false)),
-    }
+    Ok(Value::Bool(args[0].sequence().is_some()))
 }
 
 pub fn vectorp(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "vector?")?;
 
-    match args[0] {
-        Value::Vector(_) => Ok(Value::Bool(true)),
-        _ => Ok(Value::Bool(false)),
-    }
+    Ok(Value::Bool(args[0].vector().is_some()))
 }
 
 pub fn vector(args: Args) -> EvalResult {
@@ -143,8 +135,10 @@ pub fn keyword(args: Args) -> EvalResult {
 
     match &args[0] {
         keyword @ Value::Keyword(_) => Ok(keyword.clone()),
-        Value::String(s) => Ok(Value::Keyword(Rc::clone(s))),
-        _ => e::arg_type("keyword", "string or keyword", 0),
+        other => other
+            .string()
+            .map(|s| Value::make_keyword(&**s))
+            .ok_or_else(|| e::arg_type("keyword", "string or keyword", 0)),
     }
 }
 
@@ -160,37 +154,32 @@ pub fn keywordp(args: Args) -> EvalResult {
 pub fn symbol(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "symbol")?;
 
-    match &args[0] {
-        Value::String(s) => Ok(Value::Symbol(Rc::clone(s))),
-        _ => e::arg_type("symbol", "string", 0),
-    }
+    args[0]
+        .string()
+        .map(|s| Value::make_symbol(&**s))
+        .ok_or_else(|| e::arg_type("symbol", "string", 0))
 }
 
 pub fn truep(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "true?")?;
 
-    match args[0] {
-        Value::Bool(b) => Ok(Value::Bool(b)),
-        _ => Ok(Value::Bool(false)),
-    }
+    Ok(Value::Bool(
+        args[0].bool().map_or_else(|| false, |is_true| is_true),
+    ))
 }
 
 pub fn falsep(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "false?")?;
 
-    match args[0] {
-        Value::Bool(b) => Ok(Value::Bool(!b)),
-        _ => Ok(Value::Bool(false)),
-    }
+    Ok(Value::Bool(
+        args[0].bool().map_or_else(|| false, |is_true| !is_true),
+    ))
 }
 
 pub fn symbolp(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "symbol?")?;
 
-    match args[0] {
-        Value::Symbol(_) => Ok(Value::Bool(true)),
-        _ => Ok(Value::Bool(false)),
-    }
+    Ok(Value::Bool(args[0].symbol().is_some()))
 }
 
 pub fn nilp(args: Args) -> EvalResult {
@@ -202,82 +191,66 @@ pub fn nilp(args: Args) -> EvalResult {
     }
 }
 
-pub fn apply(args: Args) -> EvalResult {
+pub fn apply(mut args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n >= 1, "1 or more", "apply")?;
 
-    let mut f_args: Vector<_> = args
-        .iter()
-        .take(args.len().saturating_sub(1))
-        .skip(1)
-        .map(|c| c.clone())
-        .collect();
-
-    if args.len() > 1 {
-        match args.back().unwrap() {
-            Value::List(v) | Value::Vector(v) => f_args.append(v.clone()),
-            _ => return e::arg_type("apply", "list or vector", args.len() - 1),
-        }
+    let func = args.pop_front().unwrap();
+    match args.pop_back() {
+        Some(Value::List(seq)) | Some(Value::Vector(seq)) => args.append(seq),
+        None => (),
+        Some(_) => return Err(e::arg_type("apply", "list or vector", args.len() + 1)),
     }
-    match args.get(0).unwrap() {
+
+    match func {
+        Value::Function(func) => func(args),
         Value::Closure {
-            binds, body, env, ..
+            env,
+            binds,
+            body,
+            is_rest,
         } => {
-            if binds.len() != f_args.len() {
-                match binds.get(binds.len().saturating_sub(2)).map(|s| s.as_str()) {
-                    Some("&") => (),
-                    _ => return e::rest_parameter(),
-                }
-            }
-
-            let cenv = Env::new().env(env.clone()).binds(&binds, f_args).make();
-            eval(body.as_ref().clone(), cenv)
+            let env = Env::with_env(env).fn_binds(binds, args, is_rest)?;
+            eval(body.as_ref().clone(), env)
         }
-        Value::Function(func) => func(f_args),
-
-        _ => e::arg_type("apply", "function", 0),
+        _ => Err(e::arg_type("apply", "function", 0)),
     }
 }
 
 pub fn map(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 2, 2, "map")?;
 
-    let iter: Box<dyn Iterator<Item = &Value>> = match args.get(1).unwrap() {
-        Value::List(v) | Value::Vector(v) => Box::new(v.iter()),
-        _ => return e::arg_type("map", "list or vector", 1),
-    };
+    let mut args = args.iter();
+    let func = args.next().unwrap();
+    let seq = args
+        .next()
+        .and_then(Value::sequence)
+        .ok_or_else(|| e::arg_type("map", "list or vector", 1))?;
 
-    match args.get(0).unwrap() {
+    match func {
+        Value::Function(func) => seq
+            .iter()
+            .map(|c| func(vector![c.clone()]))
+            .collect::<Result<_, _>>()
+            .map(Value::List),
         Value::Closure {
-            binds, body, env, ..
-        } => {
-            if binds.len() != 1 && (binds.len() != 2 || binds.get(0).unwrap().as_ref() != "&") {
-                return e::rest_parameter();
-            }
-
-            Ok(Value::List(
-                iter.map(|c| {
-                    let cenv = Env::new()
-                        .env(env.clone())
-                        .binds(&binds, {
-                            let mut list = Vector::new();
-                            list.push_back(c.clone());
-                            list
-                        })
-                        .make();
-                    eval(body.as_ref().clone(), cenv)
-                })
-                .collect::<Result<_, _>>()?,
-            ))
-        }
-        Value::Function(func) => Ok(Value::List(
-            iter.map(|c| {
-                let mut list = Vector::new();
-                list.push_back(c.clone());
-                func(list)
+            binds,
+            body,
+            env,
+            is_rest,
+        } => seq
+            .iter()
+            .map(|c| {
+                let env = Env::with_env(env.clone()).fn_binds(
+                    binds.clone(),
+                    vector![c.clone()],
+                    *is_rest,
+                )?;
+                eval(body.as_ref().clone(), env)
             })
-            .collect::<Result<_, _>>()?,
-        )),
-        _ => e::arg_type("map", "function", 0),
+            .collect::<Result<_, _>>()
+            .map(Value::List),
+
+        _ => Err(e::arg_type("map", "function", 0)),
     }
 }
 
@@ -290,14 +263,16 @@ pub fn throw(args: Args) -> EvalResult {
 pub fn rest(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "rest")?;
 
-    match args[0].clone() {
-        Value::List(v) | Value::Vector(v) => {
-            let mut v = v.clone();
-            v.pop_front();
-            Ok(Value::List(v))
-        }
+    match &args[0] {
         Value::Nil => Ok(Value::List(Vector::new())),
-        _ => e::arg_type("rest", "list, vector or nil", 0),
+        other => {
+            let mut seq = other
+                .sequence()
+                .ok_or_else(|| e::arg_type("rest", "list, vector or nil", 0))?
+                .clone();
+            seq.pop_front();
+            Ok(Value::List(seq))
+        }
     }
 }
 
@@ -305,197 +280,206 @@ pub fn first(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "first")?;
 
     match &args[0] {
-        Value::List(v) | Value::Vector(v) => {
-            Ok(v.get(0).map(|c| c.clone()).unwrap_or_else(|| Value::Nil))
-        }
         Value::Nil => Ok(Value::Nil),
-        _ => e::arg_type("first", "list, vector or nil", 0),
+        other => other
+            .sequence()
+            .ok_or_else(|| e::arg_type("first", "list, vector or nil", 0))?
+            .get(0)
+            .map(Clone::clone)
+            .ok_or_else(|| Value::Nil),
     }
 }
 
 pub fn nth(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 2, 2, "nth")?;
 
-    let mut iter = args.iter();
-    let seq = iter.next().unwrap();
-    match iter.next().unwrap() {
-        Value::Number(n) => match seq {
-            Value::List(v) | Value::Vector(v) => v
-                .get(*n as usize)
-                .map(|e| e.clone())
-                .ok_or_else(|| Value::String(Rc::new("Index out of range".into()))),
-            _ => e::arg_type("nth", "list or vector", 1),
-        },
-        _ => e::arg_type("nth", "number", 0),
-    }
+    let mut args = args.iter();
+
+    let seq = args
+        .next()
+        .and_then(Value::sequence)
+        .ok_or_else(|| e::arg_type("nth", "list or vector", 0))?;
+    let inx = args
+        .next()
+        .and_then(Value::number)
+        .ok_or_else(|| e::arg_type("nth", "number", 1))?;
+
+    seq.get(*inx as usize)
+        .map(Clone::clone)
+        .ok_or_else(|| Value::make_string("Index out of range"))
 }
 
 pub fn concat(args: Args) -> EvalResult {
     let mut result = Vector::new();
-    for (i, elm) in args.iter().enumerate() {
-        match elm {
-            Value::List(vector) | Value::Vector(vector) => {
-                for item in vector.iter() {
-                    result.push_back(item.clone());
-                }
-            }
-            _ => return e::arg_type("cons", "list or vector", i),
-        }
-    }
+
+    args.iter().enumerate().try_for_each(|(i, value)| {
+        value
+            .sequence()
+            .map(|vec| result.append(vec.clone()))
+            .ok_or_else(|| e::arg_type("cons", "list or vector", i))
+    })?;
+
     Ok(Value::List(result))
 }
 
 pub fn cons(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 2, 2, "cons")?;
 
-    let mut iter = args.iter();
-    let elm = iter.next().unwrap();
-    match iter.next().unwrap() {
-        Value::List(vector) | Value::Vector(vector) => {
-            let mut list = vector.clone();
-            list.push_front(elm.clone());
-            Ok(Value::List(list))
-        }
-        _ => e::arg_type("cons", "list or vector", 1),
-    }
+    let mut args = args.iter();
+
+    let head = args.next().unwrap().clone();
+    let mut seq = args
+        .next()
+        .and_then(Value::sequence)
+        .ok_or_else(|| e::arg_type("cons", "list or vector", 1))?
+        .clone();
+
+    seq.push_front(head);
+    Ok(Value::List(seq))
 }
 
-pub fn swap(args: Args) -> EvalResult {
+pub fn swap(mut args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n >= 2, "2 or more", "swap!")?;
 
-    let mut args = args.clone();
     match args.pop_front().unwrap() {
-        Value::Atom(atom) => match args.pop_front().unwrap() {
-            Value::Function(func) => {
-                args.push_front(atom.borrow().clone());
-                let new_val = func(args)?;
-                atom.replace(new_val.clone());
-                Ok(new_val)
-            }
+        Value::Atom(atom) => {
+            let func = args.pop_front().unwrap();
+            args.push_front(atom.borrow().clone());
 
-            Value::Closure {
-                env, binds, body, ..
-            } => {
-                args.push_front(atom.borrow().clone());
-
-                if binds.len() != args.len() {
-                    match binds.get(binds.len() - 2).map(|s| s.as_str()) {
-                        Some("&") => (),
-                        _ => return e::arg_count("function in swap!", binds.len(), args.len()),
-                    }
+            match func {
+                Value::Function(func) => {
+                    let new_val = func(args)?;
+                    atom.replace(new_val.clone());
+                    Ok(new_val)
                 }
-
-                let closure_env = Env::new().env(env).binds(&binds, args).make();
-                let new_val = eval(body.as_ref().clone(), closure_env)?;
-                atom.replace(new_val.clone());
-                Ok(new_val)
+                Value::Closure {
+                    env,
+                    binds,
+                    body,
+                    is_rest,
+                } => {
+                    let env = Env::with_env(env).fn_binds(binds, args, is_rest)?;
+                    let new_val = eval(body.as_ref().clone(), env)?;
+                    atom.replace(new_val.clone());
+                    Ok(new_val)
+                }
+                _ => Err(e::arg_type("swap!", "function", 1)),
             }
-
-            _ => e::arg_type("swap!", "function", 1),
-        },
-        _ => e::arg_type("swap!", "atom", 0),
+        }
+        _ => Err(e::arg_type("swap!", "atom", 0)),
     }
 }
 
 pub fn reset(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 2, 2, "reset!")?;
 
-    let mut iter = args.iter();
-    match iter.next().unwrap() {
-        Value::Atom(atom) => {
-            let value = iter.next().unwrap();
-            atom.replace(value.clone());
-            Ok(value.clone())
-        }
-        _ => e::arg_type("reset!", "atom", 0),
-    }
+    let mut args = args.iter();
+    let atom = args
+        .next()
+        .and_then(Value::atom)
+        .ok_or_else(|| e::arg_type("reset!", "atom", 0))?;
+
+    let value = args.next().unwrap().clone();
+
+    atom.replace(value.clone());
+    Ok(value)
 }
 
 pub fn deref(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "deref")?;
 
-    match &args[0] {
-        Value::Atom(a) => Ok(a.borrow().clone()),
-        _ => e::arg_type("deref", "atom", 0),
-    }
+    args[0]
+        .atom()
+        .map(|a| a.borrow().clone())
+        .ok_or_else(|| e::arg_type("deref", "atom", 0))
 }
 
 pub fn atomp(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "atom?")?;
 
-    match args[0] {
-        Value::Atom(_) => Ok(Value::Bool(true)),
-        _ => Ok(Value::Bool(false)),
-    }
+    Ok(Value::Bool(args[0].atom().is_some()))
 }
 
 pub fn atom(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "atom")?;
 
-    Ok(Value::Atom(Rc::new(RefCell::new(args[0].clone()))))
+    Ok(Value::make_atom(args[0].clone()))
 }
 
 pub fn read_string(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "read-string")?;
 
-    match &args[0] {
-        Value::String(s) => Ok(read(s)?),
-        _ => e::arg_type("read-string", "string", 0),
-    }
+    args[0]
+        .string()
+        .map_or_else(|| Err(e::arg_type("read-string", "string", 0)), |s| read(s))
 }
 
 pub fn slurp(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "slurp")?;
 
-    match &args[0] {
-        Value::String(s) => Ok(Value::String(Rc::new(
-            read_to_string(s.as_ref()).or_else(|err| e::io(err))?,
-        ))),
-        _ => e::arg_type("slurp", "string", 0),
-    }
+    args[0].string().map_or_else(
+        || Err(e::arg_type("slurp", "string", 0)),
+        |s| {
+            read_to_string(s.as_ref())
+                .map(Value::make_string)
+                .map_err(e::io)
+        },
+    )
 }
 
 pub fn println(args: Args) -> EvalResult {
-    let mut iter = args.iter();
-    if let Some(v) = iter.next() {
+    let mut args = args.iter();
+
+    if let Some(v) = args.next() {
         print!("{}", v);
     }
 
-    for v in iter {
+    for v in args {
         print!(" {}", v);
     }
+
     println!();
     Ok(Value::Nil)
 }
 
 pub fn prn(args: Args) -> EvalResult {
-    let mut iter = args.iter();
-    if let Some(v) = iter.next() {
+    let mut args = args.iter();
+
+    if let Some(v) = args.next() {
         print!("{:?}", v);
     }
 
-    for v in iter {
+    for v in args {
         print!(" {:?}", v);
     }
+
     println!();
     Ok(Value::Nil)
 }
 
 pub fn str(args: Args) -> EvalResult {
     let mut result = String::new();
+
     for s in args.iter() {
         write!(result, "{}", s).unwrap();
     }
-    Ok(Value::String(Rc::new(result)))
+
+    Ok(Value::make_string(result))
 }
 
 pub fn pr_str(args: Args) -> EvalResult {
+    let mut args = args.iter();
     let mut result = String::new();
-    for s in args.iter() {
-        write!(result, "{:?} ", s).unwrap();
+
+    if let Some(value) = args.next() {
+        write!(result, "{:?}", value).unwrap();
     }
-    result.pop();
-    Ok(Value::String(Rc::new(result)))
+
+    for value in args {
+        write!(result, " {:?}", value).unwrap();
+    }
+
+    Ok(Value::make_string(result))
 }
 
 pub fn list(args: Args) -> EvalResult {
@@ -505,35 +489,36 @@ pub fn list(args: Args) -> EvalResult {
 pub fn listp(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "list?")?;
 
-    match args[0] {
-        Value::List(_) => Ok(Value::Bool(true)),
-        _ => Ok(Value::Bool(false)),
-    }
+    Ok(Value::Bool(args[0].list().is_some()))
 }
 
 pub fn emptyp(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "empty?")?;
 
-    match &args[0] {
-        Value::List(v) | Value::Vector(v) => Ok(Value::Bool(v.is_empty())),
-        _ => e::arg_type("empty?", "list or vector", 0),
-    }
+    args[0]
+        .sequence()
+        .map(|v| Value::Bool(v.is_empty()))
+        .ok_or_else(|| e::arg_type("empty?", "list or vector", 0))
 }
 
 pub fn count(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 1, 1, "count")?;
 
     match &args[0] {
-        Value::List(v) | Value::Vector(v) => Ok(Value::Number(v.len() as i128)),
         Value::Nil => Ok(Value::Number(0)),
-        _ => e::arg_type("count", "list, vector or nil", 0),
+        other => other
+            .sequence()
+            .map(|v| Value::Number(v.len() as i128))
+            .ok_or_else(|| e::arg_type("empty?", "list, vector or nil", 0)),
     }
 }
 
 pub fn equal(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 2, 2, '=')?;
 
-    Ok(Value::Bool(args[0] == args[1]))
+    let mut args = args.iter();
+
+    Ok(Value::Bool(args.next().unwrap() == args.next().unwrap()))
 }
 
 pub fn less(args: Args) -> EvalResult {
@@ -575,9 +560,15 @@ where
 {
     ensure_len(args.len(), |n| n == 2, 2, &name)?;
 
+    let mut args = args.iter();
+
     Ok(Value::Bool(operation(
-        &args[0].number(&name, 0)?,
-        &args[1].number(name, 1)?,
+        args.next()
+            .and_then(Value::number)
+            .ok_or_else(|| e::arg_type(&name, "number", 0))?,
+        args.next()
+            .and_then(Value::number)
+            .ok_or_else(|| e::arg_type(name, "number", 1))?,
     )))
 }
 
@@ -589,10 +580,18 @@ fn arithmetic_operation<D: Display>(
 ) -> EvalResult {
     ensure_len(args.len(), |n| n == 2, 2, &name)?;
 
-    let first = args[0].number(&name, 0)?;
-    let second = args[1].number(&name, 1)?;
+    let mut args = args.iter();
 
-    operation(first, second)
+    let first = args
+        .next()
+        .and_then(Value::number)
+        .ok_or_else(|| e::arg_type(&name, "number", 0))?;
+    let second = args
+        .next()
+        .and_then(Value::number)
+        .ok_or_else(|| e::arg_type(&name, "number", 1))?;
+
+    operation(*first, *second)
         .map(Value::Number)
         .ok_or_else(|| e::numeric_overflow(name, first, second))
 }
@@ -607,16 +606,18 @@ where
     if p(provided) {
         Ok(())
     } else {
-        e::arg_count(name, required, provided)
+        Err(e::arg_count(name, required, provided))
     }
 }
 
-#[inline]
-fn odds<'a, I: Iterator<Item = &'a Value>>(i: I) -> impl Iterator<Item = &'a Value> {
-    i.enumerate().filter(|(i, _)| i % 2 != 0).map(|(_, v)| v)
-}
+pub struct Pairs<'a, I: Iterator<Item = &'a Value>>(pub I);
 
-#[inline]
-fn evens<'a, I: Iterator<Item = &'a Value>>(i: I) -> impl Iterator<Item = &'a Value> {
-    i.enumerate().filter(|(i, _)| i % 2 == 0).map(|(_, k)| k)
+impl<'a, I: Iterator<Item = &'a Value>> Iterator for Pairs<'a, I> {
+    type Item = (&'a Value, &'a Value);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0
+            .next()
+            .and_then(|key| self.0.next().map(|value| (key, value)))
+    }
 }

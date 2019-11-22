@@ -73,7 +73,7 @@ impl TryFrom<Value> for HashMapKey {
             Value::Number(n) => Ok(HashMapKey::Number(n)),
             Value::Bool(b) => Ok(HashMapKey::Bool(b)),
             Value::Nil => Ok(HashMapKey::Nil),
-            provided => e::invalid_hash_key(provided),
+            provided => Err(e::invalid_hash_key(provided)),
         }
     }
 }

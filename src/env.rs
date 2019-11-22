@@ -2,7 +2,11 @@ use im_rc::Vector;
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::value::Value;
+use crate::{
+    core::{ensure_len, Pairs},
+    error as e, eval,
+    value::{Args, Binds, Value},
+};
 
 pub struct Env(Rc<LispEnv>);
 
@@ -12,11 +16,18 @@ struct LispEnv {
 }
 
 impl Env {
-    pub fn new() -> EnvBuilder {
-        EnvBuilder {
-            data: HashMap::new(),
+    pub fn new() -> Self {
+        Self(Rc::new(LispEnv {
+            data: RefCell::new(HashMap::new()),
             outer: None,
-        }
+        }))
+    }
+
+    pub fn with_env(env: Self) -> Self {
+        Self(Rc::new(LispEnv {
+            data: RefCell::new(HashMap::new()),
+            outer: Some(env),
+        }))
     }
 
     pub fn get(&self, k: &Rc<String>) -> Option<Value> {
@@ -24,7 +35,7 @@ impl Env {
             .data
             .borrow()
             .get(k)
-            .map(|c| c.clone())
+            .map(Clone::clone)
             .or_else(|| self.0.outer.as_ref().and_then(|e| e.get(k)))
     }
 
@@ -32,33 +43,60 @@ impl Env {
         self.0
             .outer
             .as_ref()
-            .map_or_else(|| self.clone(), |o| o.most_outer())
+            .map_or_else(|| self.clone(), Env::most_outer)
     }
 
     pub fn set(&self, key: Rc<String>, value: Value) -> Value {
         self.0.data.borrow_mut().insert(key, value.clone());
         value
     }
-}
 
-impl Clone for Env {
-    fn clone(&self) -> Self {
-        Self(Rc::clone(&self.0))
+    pub fn let_binds(self, binds: Vector<Value>) -> Result<Self, Value> {
+        ensure_len(binds.len(), |n| n % 2 == 0, "even number of args", "let*")?;
+
+        {
+            let mut href = self.0.data.borrow_mut();
+
+            for (i, (k, v)) in Pairs(binds.iter()).enumerate() {
+                href.insert(
+                    k.symbol()
+                        .map(Rc::clone)
+                        .ok_or_else(|| e::arg_type("let*", "symbol", i * 2))?,
+                    eval(v.clone(), self.clone())?,
+                );
+            }
+        }
+
+        Ok(self)
     }
-}
 
-pub struct EnvBuilder {
-    data: HashMap<Rc<String>, Value>,
-    outer: Option<Env>,
-}
+    pub fn fn_binds(self, binds: Binds, args: Args, is_rest: bool) -> Result<Self, Value> {
+        let (alen, len, mut take) = (args.len(), binds.len(), binds.len());
+        if is_rest {
+            ensure_len(alen, |n| n >= len, format!("{} or more", len), "_fn*_")?;
+            take -= 1;
+        } else {
+            ensure_len(alen, |n| n >= len, len, "_fn*_")?;
+        }
 
-impl EnvBuilder {
-    pub fn env(mut self, env: Env) -> Self {
-        self.outer = Some(env);
-        self
+        {
+            let mut href = self.0.data.borrow_mut();
+
+            for (k, v) in binds.iter().zip(args.iter()).take(take) {
+                href.insert(Rc::clone(&k), v.clone());
+            }
+
+            if is_rest {
+                href.insert(
+                    Rc::clone(&binds[take]),
+                    Value::List(args.iter().skip(take).map(Clone::clone).collect()),
+                );
+            }
+        }
+        Ok(self)
     }
 
-    pub fn with_core(mut self) -> Self {
+    pub fn with_core(self) -> Self {
         use crate::{
             core::{
                 add, apply, assoc, atom, atomp, concat, cons, containsp, count, deref, dissoc,
@@ -67,10 +105,10 @@ impl EnvBuilder {
                 pr_str, println, prn, read_string, reset, rest, sequentialp, slurp, str, subtract,
                 swap, symbol, symbolp, throw, truep, vals, vector, vectorp,
             },
-            value::Function,
+            value::BuiltinFunction,
         };
 
-        let funcs: &[(&str, Function)] = &[
+        let funcs: &[(&str, BuiltinFunction)] = &[
             ("+", add),
             ("-", subtract),
             ("*", multiply),
@@ -123,55 +161,21 @@ impl EnvBuilder {
             ("symbol", symbol),
         ];
 
-        for (n, f) in funcs {
-            self.data.insert(Rc::new((*n).into()), Value::Function(*f));
-        }
-
-        self.data
-            .insert(Rc::new("*ARGV*".into()), Value::List(Vector::new()));
-
-        self
-    }
-
-    pub fn binds(mut self, vars: &Vec<Rc<String>>, values: Vector<Value>) -> Self {
-        let mut vars_iter = vars.iter();
-        let mut values = values.clone();
-
-        while let Some(s) = vars_iter.next() {
-            if s.as_ref() != "&" {
-                let value = values
-                    .pop_front()
-                    .expect("eval bug: not enough arguments! Should check at before!");
-
-                self.data.insert(Rc::clone(s), value);
-            } else {
-                let next_sym = vars_iter
-                    .next()
-                    .expect("eval bug: not enough arguments for rest (&) parameters");
-
-                self.data.insert(next_sym.clone(), Value::List(values));
-
-                if let Some(_) = vars_iter.next() {
-                    panic!("too much arguments after rest (&) parameters");
-                }
-                break;
+        {
+            let mut href = self.0.data.borrow_mut();
+            for (n, f) in funcs {
+                href.insert(Rc::new((*n).into()), Value::Function(*f));
             }
-        }
 
-        if let Some(_) = vars_iter.next() {
-            panic!("not enough values for function");
+            href.insert(Rc::new("*ARGV*".into()), Value::List(Vector::new()));
         }
-
         self
     }
+}
 
-    pub fn make(mut self) -> Env {
-        let outer = self.outer.take();
-
-        Env(Rc::new(LispEnv {
-            data: RefCell::new(self.data),
-            outer,
-        }))
+impl Clone for Env {
+    fn clone(&self) -> Self {
+        Self(Rc::clone(&self.0))
     }
 }
 
