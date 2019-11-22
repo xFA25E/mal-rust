@@ -79,7 +79,7 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
         ast = macroexpand(ast, env.clone())?;
 
         match ast {
-            Value::List(form) => match form.front() {
+            Value::List(form) => match form.get(0) {
                 Some(Value::Symbol(s)) if s.as_ref() == "defmacro!" => {
                     ensure_len(form.len(), |n| n == 3, 2, "defmacro!")?;
                     let mut form_iter = form.iter();
@@ -129,10 +129,10 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
 
                     let new_env = match bindings {
                         Value::Vector(binds) | Value::List(binds) => {
-                            Env::with_env(env.clone()).let_binds(binds.clone())
+                            Env::with_env(env.clone()).let_binds(binds.clone())?
                         }
-                        _ => Err(e::arg_type("let*", "list or vector", 0)),
-                    }?;
+                        _ => return Err(e::arg_type("let*", "list or vector", 0)),
+                    };
 
                     env = new_env;
                     ast = body;
@@ -157,7 +157,7 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
                     ast = match eval(cond, env.clone())? {
                         Value::Nil | Value::Bool(false) => form_iter
                             .nth(1)
-                            .map(|v| v.clone())
+                            .map(Clone::clone)
                             .unwrap_or_else(|| Value::Nil),
                         _ => form_iter.next().unwrap().clone(),
                     };
@@ -169,35 +169,32 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
                     let mut form_iter = form.iter();
                     form_iter.next();
 
-                    let binds = match form_iter.next().unwrap() {
-                        Value::List(bs) | Value::Vector(bs) => {
-                            let mut binds = Vector::new();
-                            for (i, bind) in bs.iter().enumerate() {
-                                match bind {
-                                    Value::Symbol(s) => binds.push_back(s.clone()),
-                                    _ => return Err(e::arg_type("fn* args", "symbol", i)),
-                                }
-                            }
-                            binds
-                        }
-                        _ => return Err(e::arg_type("fn*", "list or vector", 0)),
-                    };
+                    let binds_ref = form_iter
+                        .next()
+                        .and_then(Value::sequence)
+                        .ok_or_else(|| e::arg_type("fn*", "list or vector", 0))?;
 
+                    let mut iter = binds_ref.iter().enumerate();
+                    let mut binds = Vector::new();
                     let mut is_rest = false;
-                    let mut pos_iter = binds.iter();
-                    if let Some(pos) = pos_iter.position(|p| p.as_ref() == "&") {
-                        if pos != binds.len() - 2 {
-                            return Err(e::rest_parameter());
+
+                    while let Some((i, bind)) = iter.next() {
+                        let sym = bind
+                            .symbol()
+                            .ok_or_else(|| e::arg_type("fn* args", "symbol", i))?;
+                        if sym.as_ref() == "&" {
+                            if binds_ref.len() - i != 2 {
+                                return Err(e::rest_parameter());
+                            }
+                            is_rest = true;
+                        } else {
+                            binds.push_back(Rc::clone(sym));
                         }
-                        if let Some("&") = pos_iter.next().map(|s| s.as_str()) {
-                            return Err(e::rest_parameter());
-                        }
-                        is_rest = true;
                     }
 
                     return Ok(Value::Closure {
                         env,
-                        binds: binds,
+                        binds,
                         body: Rc::new(form_iter.next().unwrap().clone()),
                         is_rest,
                     });
@@ -205,45 +202,42 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
 
                 Some(Value::Symbol(ref s)) if s.as_ref() == "eval" => {
                     ensure_len(form.len(), |n| n == 2, 1, "eval")?;
-                    ast = eval(form.get(1).unwrap().clone(), env.clone())?;
+                    ast = eval(form[1].clone(), env.clone())?;
                     env = env.most_outer();
                 }
 
                 Some(Value::Symbol(ref s)) if s.as_ref() == "quote" => {
                     ensure_len(form.len(), |n| n == 2, 2, "quote")?;
-                    return Ok(form.get(1).unwrap().clone());
+                    return Ok(form[1].clone());
                 }
 
                 Some(Value::Symbol(ref s)) if s.as_ref() == "quasiquote" => {
                     ensure_len(form.len(), |n| n == 2, 1, "quasiquote")?;
-                    ast = quasiquote(form.get(1).unwrap().clone());
+                    ast = quasiquote(form[1].clone());
                 }
 
                 Some(Value::Symbol(ref s)) if s.as_ref() == "macroexpand" => {
                     ensure_len(form.len(), |n| n == 2, 1, "macroexpand")?;
-                    return macroexpand(form.get(1).unwrap().clone(), env);
+                    return macroexpand(form[1].clone(), env);
                 }
 
                 Some(Value::Symbol(ref s)) if s.as_ref() == "try*" => {
                     ensure_len(form.len(), |n| n == 3, 2, "try*")?;
 
-                    match eval(form.get(1).unwrap().clone(), env.clone()) {
-                        Err(e) => match form.get(2).unwrap() {
+                    match eval(form[1].clone(), env.clone()) {
+                        Err(e) => match &form[2] {
                             Value::List(catch) => {
                                 ensure_len(catch.len(), |n| n == 3, 2, "catch*")?;
 
-                                match catch.get(0).unwrap() {
-                                    Value::Symbol(s) if s.as_ref() == "catch*" => {
-                                        match catch.get(1).unwrap() {
-                                            Value::Symbol(bind) => {
-                                                let new_env = Env::with_env(env);
-                                                new_env.set(bind.clone(), e);
-                                                env = new_env;
-                                                ast = catch.get(2).unwrap().clone();
-                                            }
-                                            _ => return Err(e::arg_type("catch*", "symbol", 0)),
+                                match &catch[0] {
+                                    Value::Symbol(s) if s.as_ref() == "catch*" => match &catch[1] {
+                                        Value::Symbol(bind) => {
+                                            env = Env::with_env(env);
+                                            env.set(bind.clone(), e);
+                                            ast = catch[2].clone();
                                         }
-                                    }
+                                        _ => return Err(e::arg_type("catch*", "symbol", 0)),
+                                    },
                                     _ => return e::catch_block(),
                                 }
                             }
@@ -255,44 +249,25 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
 
                 Some(Value::Symbol(_)) | Some(Value::List(_)) => {
                     match eval_ast(Value::List(form.clone()), env.clone())? {
-                        Value::List(list) => {
-                            let mut list = list.clone();
-                            match list.pop_front().unwrap() {
-                                Value::Function(func) => return func(list),
-
-                                Value::Closure {
-                                    env: cenv,
-                                    binds,
-                                    body,
-                                    is_rest,
-                                } => {
-                                    if binds.len() != list.len() {
-                                        match binds.get(binds.len() - 2).map(|s| s.as_str()) {
-                                            Some("&") => (),
-                                            _ => {
-                                                return Err(e::rest_parameter());
-                                            }
-                                        }
-                                    }
-
-                                    let closure_env = Env::with_env(cenv.clone()).fn_binds(
-                                        binds,
-                                        list.iter().map(Clone::clone).collect(),
-                                        is_rest,
-                                    )?;
-
-                                    ast = body.as_ref().clone();
-                                    env = closure_env;
-                                }
-
-                                _ => return Err(e::not_function(form.get(0).unwrap())),
+                        Value::List(mut list) => match list.pop_front().unwrap() {
+                            Value::Function(func) => return func(list),
+                            Value::Closure {
+                                env: cenv,
+                                binds,
+                                body,
+                                is_rest,
+                            } => {
+                                env = Env::with_env(cenv).fn_binds(binds, list, is_rest)?;
+                                ast = body.as_ref().clone();
                             }
-                        }
+
+                            _ => return Err(e::not_function(&form[0])),
+                        },
                         _ => panic!("eval bug: expected list got something else"),
                     }
                 }
 
-                Some(_) => return Err(e::not_function(form.get(0).unwrap())),
+                Some(_) => return Err(e::not_function(&form[0])),
                 None => return Ok(Value::List(form)),
             },
             other => return eval_ast(other, env),
@@ -324,10 +299,10 @@ fn eval_ast(ast: Value, env: Env) -> EvalResult {
 
 // if ast = (ast-first ast-rest...)
 // then
-//     if ast = (unquote usomething)
+//     if ast = ("unquote" usomething)
 //     then return usomething
 //     else
-//         if ast = ((splice-unquote something) rest...)
+//         if ast = (("splice-unquote" something) rest...)
 //         then return (concat something (quasiquote rest))
 //         else return (cons (quasiquote ast-first) (quasiquote ast-rest))
 // else return (quote ast)
