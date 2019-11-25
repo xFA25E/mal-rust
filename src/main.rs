@@ -282,8 +282,9 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
                             ast = body.as_ref().clone();
                         }
                         Value::Symbol(ref s) if s.as_str() == "apply" => {
+                            ensure_len(list.len(), |n| n >= 1, "1 or more", "apply")?;
                             list.push_front(Value::Symbol(Rc::clone(s)));
-                            list.push_back(Value::make_list(Vector::new()));
+                            list.push_back(Value::make_vector(Vector::new()));
                             ast = Value::make_list(list);
                         }
                         s => return Err(e::not_function(s)),
