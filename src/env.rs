@@ -101,12 +101,12 @@ impl Env {
     pub fn with_core(self) -> Self {
         use crate::{
             core::{
-                add, apply, assoc, atom, atomp, concat, conj, cons, containsp, count, deref,
-                dissoc, divide, emptyp, equal, falsep, first, fnp, get, greater, greater_equal,
-                hash_map, keys, keyword, keywordp, less, less_equal, list, listp, macrop, map,
-                mapp, meta, multiply, nilp, nth, numberp, pr_str, println, prn, read_string,
-                readline, reset, rest, seq, sequentialp, slurp, str, stringp, subtract, swap,
-                symbol, symbolp, throw, time_ms, truep, vals, vector, vectorp, with_meta,
+                add, assoc, atom, atomp, concat, conj, cons, containsp, count, deref, dissoc,
+                divide, emptyp, equal, falsep, first, fnp, get, greater, greater_equal, hash_map,
+                keys, keyword, keywordp, less, less_equal, list, listp, macrop, map, mapp, meta,
+                multiply, nilp, nth, numberp, pr_str, println, prn, read_string, readline, reset,
+                rest, seq, sequentialp, slurp, str, stringp, subtract, swap, symbol, symbolp,
+                throw, time_ms, truep, vals, vector, vectorp, with_meta,
             },
             value::BuiltinFunction,
         };
@@ -143,7 +143,7 @@ impl Env {
             ("rest", rest),
             ("throw", throw),
             ("map", map),
-            ("apply", apply),
+            // ("apply", apply),
             ("nil?", nilp),
             ("true?", truep),
             ("false?", falsep),
@@ -184,6 +184,10 @@ impl Env {
             href.insert(
                 Rc::new("*host-language*".into()),
                 Value::make_string("rust"),
+            );
+            href.insert(
+                Rc::new("apply".into()),
+                Value::make_string("#<keyword-fn apply"),
             );
         }
         self

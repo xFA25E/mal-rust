@@ -361,32 +361,6 @@ pub fn nilp(args: Args) -> EvalResult {
     }
 }
 
-pub fn apply(mut args: Args) -> EvalResult {
-    ensure_len(args.len(), |n| n >= 1, "1 or more", "apply")?;
-
-    let func = args.pop_front().unwrap();
-    match args.pop_back() {
-        Some(Value::List(seq, _)) | Some(Value::Vector(seq, _)) => args.append(seq),
-        None => (),
-        Some(_) => return Err(e::arg_type("apply", "list or vector", args.len() + 1)),
-    }
-
-    match func {
-        Value::Function(func, _) => func(args),
-        Value::Closure {
-            env,
-            binds,
-            body,
-            is_rest,
-            ..
-        } => {
-            let env = Env::with_env(env).fn_binds(binds, args, is_rest)?;
-            eval(body.as_ref().clone(), env)
-        }
-        _ => Err(e::arg_type("apply", "function", 0)),
-    }
-}
-
 pub fn map(args: Args) -> EvalResult {
     ensure_len(args.len(), |n| n == 2, 2, "map")?;
 

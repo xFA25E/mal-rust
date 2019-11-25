@@ -223,7 +223,7 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
                                 .unwrap()
                                 .owned_symbol()
                                 .filter(|s| s.as_str() == "catch*")
-                                .ok_or_else(|| e::catch_block())?;
+                                .ok_or_else(e::catch_block)?;
 
                             let bind = catch
                                 .pop_front()
@@ -239,11 +239,26 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
                     }
                 }
 
-                Some(func @ Value::List(_, _)) | Some(func @ Value::Symbol(_)) => {
+                Some(mut func @ Value::List(_, _)) | Some(mut func @ Value::Symbol(_)) => {
+                    let is_apply = func.symbol().unwrap().as_str() == "apply";
+
+                    if is_apply {
+                        ensure_len(form.len(), |n| n >= 1, "1 or more", "apply")?;
+                        func = form.pop_front().unwrap();
+                    }
+
                     let func = eval(func, env.clone())?;
-                    let list = eval_ast(Value::make_list(form), env.clone())?
+
+                    let mut list = eval_ast(Value::make_list(form), env.clone())?
                         .owned_list()
                         .unwrap();
+
+                    if is_apply && !list.is_empty() {
+                        let seq = list.pop_back().unwrap().owned_sequence().ok_or_else(|| {
+                            e::arg_type("apply", "list or vector", list.len() + 1)
+                        })?;
+                        list.append(seq);
+                    }
 
                     match func {
                         Value::Function(func, _) => return func(list),
