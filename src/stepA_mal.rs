@@ -34,7 +34,7 @@ pub fn main() -> std::io::Result<()> {
     if let Some(file) = args.next() {
         repl_env.set(
             Rc::new("*ARGS*".into()),
-            Value::List(args.map(Value::make_string).collect()),
+            Value::make_list(args.map(Value::make_string).collect()),
         );
 
         match rep(&format!("(load-file \"{}\")", file), repl_env) {
@@ -42,7 +42,7 @@ pub fn main() -> std::io::Result<()> {
                 println!("{:?}", val);
             }
             Err(e) => {
-                eprintln!("{}", e);
+                eprintln!("Exception: {}", e);
             }
         }
         Ok(())
@@ -52,25 +52,25 @@ pub fn main() -> std::io::Result<()> {
             repl_env.clone(),
         )
         .unwrap();
+
         let mut line = String::new();
-
-        write!(stdout().lock(), "user> ")?;
-        stdout().lock().flush()?;
-
         loop {
+            write!(stdout().lock(), "user> ").and_then(|_| stdout().lock().flush())?;
+
             line.clear();
-            stdin().lock().read_line(&mut line)?;
+            match stdin().lock().read_line(&mut line) {
+                res @ Ok(0) | res @ Err(_) => return res.map(|_| ()),
+                Ok(1) => continue,
+                _ => (),
+            }
 
             match rep(&line, repl_env.clone()) {
                 Ok(val) => {
                     writeln!(stdout().lock(), "{:?}", val).and_then(|_| stdout().lock().flush())?
                 }
-                Err(e) => {
-                    writeln!(stderr().lock(), "{}", e).and_then(|_| stderr().lock().flush())?
-                }
+                Err(e) => writeln!(stderr().lock(), "Exception: {}", e)
+                    .and_then(|_| stderr().lock().flush())?,
             }
-
-            write!(stdout().lock(), "user> ").and_then(|_| stdout().lock().flush())?;
         }
     }
 }
@@ -84,7 +84,9 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
         ast = macroexpand(ast, env.clone())?;
 
         match ast {
-            Value::List(mut form) => match form.pop_front() {
+            Value::List(mut form, _) => match form.pop_front() {
+                None => return Ok(Value::make_list(Vector::new())),
+
                 Some(Value::Symbol(ref s)) if s.as_str() == "defmacro!" => {
                     ensure_len(form.len(), |n| n == 2, 2, "defmacro!")?;
                     let sym = form
@@ -174,12 +176,12 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
                         }
                     }
 
-                    return Ok(Value::Closure {
+                    return Ok(Value::make_closure(
                         env,
-                        binds: syms,
-                        body: Rc::new(form.pop_front().unwrap()),
+                        syms,
+                        Rc::new(form.pop_front().unwrap()),
                         is_rest,
-                    });
+                    ));
                 }
 
                 Some(Value::Symbol(ref s)) if s.as_str() == "eval" => {
@@ -237,19 +239,20 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
                     }
                 }
 
-                Some(func @ Value::List(_)) | Some(func @ Value::Symbol(_)) => {
+                Some(func @ Value::List(_, _)) | Some(func @ Value::Symbol(_)) => {
                     let func = eval(func, env.clone())?;
-                    let list = eval_ast(Value::List(form), env.clone())?
+                    let list = eval_ast(Value::make_list(form), env.clone())?
                         .owned_list()
                         .unwrap();
 
                     match func {
-                        Value::Function(func) => return func(list),
+                        Value::Function(func, _) => return func(list),
                         Value::Closure {
                             env: cenv,
                             binds,
                             body,
                             is_rest,
+                            ..
                         } => {
                             env = Env::with_env(cenv).fn_binds(binds, list, is_rest)?;
                             ast = body.as_ref().clone();
@@ -259,7 +262,6 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
                 }
 
                 Some(_) => return Err(e::not_function(&form[0])),
-                None => return Ok(Value::List(form)),
             },
             other => return eval_ast(other, env),
         }
@@ -269,21 +271,21 @@ pub fn eval(mut ast: Value, mut env: Env) -> EvalResult {
 fn eval_ast(ast: Value, env: Env) -> EvalResult {
     match ast {
         Value::Symbol(s) => env.get(&s).ok_or_else(|| e::symbol_not_found(s)),
-        Value::List(l) => l
-            .iter()
-            .map(|elm| eval(elm.clone(), env.clone()))
+        Value::List(l, _) => l
+            .into_iter()
+            .map(|elm| eval(elm, env.clone()))
             .collect::<Result<_, _>>()
-            .map(Value::List),
-        Value::Vector(v) => v
-            .iter()
-            .map(|elm| eval(elm.clone(), env.clone()))
+            .map(Value::make_list),
+        Value::Vector(v, _) => v
+            .into_iter()
+            .map(|elm| eval(elm, env.clone()))
             .collect::<Result<_, _>>()
-            .map(Value::Vector),
-        Value::HashMap(h) => h
-            .iter()
-            .map(|(k, v)| Ok((k.clone(), eval(v.clone(), env.clone())?)))
+            .map(Value::make_vector),
+        Value::HashMap(h, _) => h
+            .into_iter()
+            .map(|(k, v)| Ok((k, eval(v, env.clone())?)))
             .collect::<Result<_, _>>()
-            .map(Value::HashMap),
+            .map(Value::make_hashmap),
         other => Ok(other),
     }
 }
@@ -305,23 +307,23 @@ fn quasiquote(ast: Value) -> Value {
                 if let Some(mut seq_first) = is_pair(&ast_first).map(|s| s.iter()) {
                     if let Value::Symbol(s) = seq_first.next().unwrap() {
                         if s.as_ref() == "splice-unquote" {
-                            return Value::List(vector![
+                            return Value::make_list(vector![
                                 Value::make_symbol("concat"),
                                 seq_first.next().unwrap().clone(),
-                                quasiquote(Value::List(seq))
+                                quasiquote(Value::make_list(seq))
                             ]);
                         }
                     }
                 }
-                Value::List(vector![
+                Value::make_list(vector![
                     Value::make_symbol("cons"),
                     quasiquote(ast_first),
-                    quasiquote(Value::List(seq))
+                    quasiquote(Value::make_list(seq))
                 ])
             }
         }
     } else {
-        Value::List(vector![Value::make_symbol("quote"), ast])
+        Value::make_list(vector![Value::make_symbol("quote"), ast])
     }
 }
 
@@ -331,12 +333,13 @@ fn is_pair(ast: &Value) -> Option<&Vector<Value>> {
 
 fn macroexpand(mut ast: Value, env: Env) -> EvalResult {
     loop {
-        if let Value::List(mut l) = ast.clone() {
+        if let Value::List(mut l, _) = ast.clone() {
             if let Some(Value::Macro {
                 env: cenv,
                 binds,
                 body,
                 is_rest,
+                ..
             }) = l.get(0).and_then(Value::symbol).and_then(|s| env.get(s))
             {
                 l.pop_front();

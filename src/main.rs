@@ -5,9 +5,9 @@ mod hashmapkey;
 mod reader;
 mod value;
 
-mod step9_try;
-use step9_try::eval;
-use step9_try::main as mmain;
+mod stepA_mal;
+use stepA_mal::eval;
+use stepA_mal::main as mmain;
 
 fn main() {
     let result = mmain();

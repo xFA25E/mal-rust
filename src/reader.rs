@@ -40,6 +40,7 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
             "~" => self.read_unquote(),
             "~@" => self.read_splice_unquote(),
             "@" => self.read_deref(),
+            "^" => self.read_meta(),
             token if token.starts_with('(') => self.read_list(),
             token if token.starts_with('[') => self.read_vector(),
             token if token.starts_with('{') => self.read_hash_map(),
@@ -57,11 +58,11 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
     }
 
     fn read_list(&mut self) -> EvalResult {
-        self.read_sequence(')').map(Value::List)
+        self.read_sequence(')').map(Value::make_list)
     }
 
     fn read_vector(&mut self) -> EvalResult {
-        self.read_sequence(']').map(Value::Vector)
+        self.read_sequence(']').map(Value::make_vector)
     }
 
     fn read_sequence(&mut self, end: char) -> Result<Vector<Value>, Value> {
@@ -83,7 +84,7 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
             let token = self.0.peek().ok_or_else(|| e::unexpected_end('}'))?;
             if token.starts_with(end) {
                 self.0.next();
-                return Ok(Value::HashMap(map));
+                return Ok(Value::make_hashmap(map));
             }
             let key = self.read_ignore_comment()?.try_into()?;
 
@@ -120,9 +121,19 @@ impl<'s, I: Iterator<Item = &'s str>> Reader<'s, I> {
     }
 
     fn read_read_macro(&mut self, rm: &str) -> EvalResult {
-        Ok(Value::List(vector![
+        Ok(Value::make_list(vector![
             Value::make_symbol(rm),
             self.read_ignore_comment()?,
+        ]))
+    }
+
+    fn read_meta(&mut self) -> EvalResult {
+        let meta = self.read_ignore_comment()?;
+        let func = self.read_ignore_comment()?;
+        Ok(Value::make_list(vector![
+            Value::make_symbol("with-meta"),
+            func,
+            meta,
         ]))
     }
 

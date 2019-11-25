@@ -22,24 +22,26 @@ pub enum Value {
     Symbol(Rc<String>),
     Keyword(Rc<String>),
     String(Rc<String>),
-    List(Vector<Value>),
-    Vector(Vector<Value>),
-    HashMap(HashMap<HashMapKey, Value>),
-    Function(BuiltinFunction),
+    List(Vector<Value>, Rc<Value>),
+    Vector(Vector<Value>, Rc<Value>),
+    HashMap(HashMap<HashMapKey, Value>, Rc<Value>),
+    Function(BuiltinFunction, Rc<Value>),
     Closure {
         env: Env,
         binds: Vector<Rc<String>>,
         body: Rc<Value>,
         is_rest: bool,
+        meta: Rc<Value>,
     },
     Macro {
         env: Env,
         binds: Vector<Rc<String>>,
         body: Rc<Value>,
         is_rest: bool,
+        meta: Rc<Value>,
     },
     Comment,
-    Atom(Rc<RefCell<Value>>),
+    Atom(Rc<RefCell<Value>>, Rc<Value>),
 }
 
 impl Value {
@@ -62,7 +64,7 @@ impl Value {
     #[inline]
     pub fn hashmap(&self) -> Option<&HashMap<HashMapKey, Value>> {
         match self {
-            Value::HashMap(h) => Some(h),
+            Value::HashMap(h, _) => Some(h),
             _ => None,
         }
     }
@@ -86,7 +88,7 @@ impl Value {
     #[inline]
     pub fn list(&self) -> Option<&Vector<Value>> {
         match self {
-            Value::List(v) => Some(v),
+            Value::List(v, _) => Some(v),
             _ => None,
         }
     }
@@ -94,7 +96,51 @@ impl Value {
     #[inline]
     pub fn vector(&self) -> Option<&Vector<Value>> {
         match self {
-            Value::Vector(v) => Some(v),
+            Value::Vector(v, _) => Some(v),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn closure_to_macro(self) -> Option<Self> {
+        match self {
+            Self::Closure {
+                env,
+                binds,
+                body,
+                is_rest,
+                meta,
+            } => Some(Self::Macro {
+                env,
+                binds,
+                body,
+                is_rest,
+                meta,
+            }),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn owned_symbol(self) -> Option<Rc<String>> {
+        match self {
+            Value::Symbol(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn owned_list(self) -> Option<Vector<Value>> {
+        match self {
+            Value::List(v, _) => Some(v),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn owned_sequence(self) -> Option<Vector<Value>> {
+        match self {
+            Value::List(v, _) | Value::Vector(v, _) => Some(v),
             _ => None,
         }
     }
@@ -102,7 +148,7 @@ impl Value {
     #[inline]
     pub fn sequence(&self) -> Option<&Vector<Value>> {
         match self {
-            Value::List(v) | Value::Vector(v) => Some(v),
+            Value::List(v, _) | Value::Vector(v, _) => Some(v),
             _ => None,
         }
     }
@@ -110,19 +156,55 @@ impl Value {
     #[inline]
     pub fn atom(&self) -> Option<&Rc<RefCell<Value>>> {
         match self {
-            Value::Atom(a) => Some(a),
+            Value::Atom(a, _) => Some(a),
             _ => None,
         }
     }
 
     #[inline]
     pub fn make_atom(v: Value) -> Self {
-        Value::Atom(Rc::new(RefCell::new(v)))
+        Value::Atom(Rc::new(RefCell::new(v)), Rc::new(Value::Nil))
     }
 
     #[inline]
     pub fn make_keyword<I: Into<String>>(s: I) -> Self {
         Value::Keyword(Rc::new(s.into()))
+    }
+
+    #[inline]
+    pub fn make_vector(v: Vector<Value>) -> Self {
+        Value::Vector(v, Rc::new(Value::Nil))
+    }
+
+    #[inline]
+    pub fn make_hashmap(h: HashMap<HashMapKey, Value>) -> Self {
+        Value::HashMap(h, Rc::new(Value::Nil))
+    }
+
+    #[inline]
+    pub fn make_function(f: BuiltinFunction) -> Self {
+        Value::Function(f, Rc::new(Value::Nil))
+    }
+
+    #[inline]
+    pub fn make_closure(
+        env: Env,
+        binds: Vector<Rc<String>>,
+        body: Rc<Value>,
+        is_rest: bool,
+    ) -> Self {
+        Value::Closure {
+            env,
+            binds,
+            body,
+            is_rest,
+            meta: Rc::new(Value::Nil),
+        }
+    }
+
+    #[inline]
+    pub fn make_list(l: Vector<Value>) -> Self {
+        Value::List(l, Rc::new(Value::Nil))
     }
 
     #[inline]
@@ -145,34 +227,38 @@ impl Clone for Value {
             Self::Symbol(s) => Self::Symbol(Rc::clone(s)),
             Self::Keyword(s) => Self::Keyword(Rc::clone(s)),
             Self::String(s) => Self::String(Rc::clone(s)),
-            Self::List(l) => Self::List(l.clone()),
-            Self::Vector(v) => Self::Vector(v.clone()),
-            Self::HashMap(h) => Self::HashMap(h.clone()),
-            Self::Function(fp) => Self::Function(*fp),
+            Self::List(l, m) => Self::List(l.clone(), Rc::clone(m)),
+            Self::Vector(v, m) => Self::Vector(v.clone(), Rc::clone(m)),
+            Self::HashMap(h, m) => Self::HashMap(h.clone(), Rc::clone(m)),
+            Self::Function(fp, m) => Self::Function(*fp, Rc::clone(m)),
             Self::Closure {
                 env,
                 binds,
                 body,
                 is_rest,
+                meta,
             } => Self::Closure {
                 env: env.clone(),
                 binds: binds.clone(),
                 body: Rc::clone(body),
                 is_rest: *is_rest,
+                meta: meta.clone(),
             },
             Self::Macro {
                 env,
                 binds,
                 body,
                 is_rest,
+                meta,
             } => Self::Macro {
                 env: env.clone(),
                 binds: binds.clone(),
                 body: Rc::clone(body),
                 is_rest: *is_rest,
+                meta: meta.clone(),
             },
             Self::Comment => Self::Comment,
-            Self::Atom(a) => Self::Atom(Rc::clone(a)),
+            Self::Atom(a, m) => Self::Atom(Rc::clone(a), Rc::clone(m)),
         }
     }
 }
@@ -204,17 +290,17 @@ impl PartialEq for Value {
                 Self::String(o) => string == o,
                 _ => false,
             },
-            Self::List(list) | Self::Vector(list) => match other {
-                Self::List(vector) | Self::Vector(vector) => list == vector,
+            Self::List(list, _) | Self::Vector(list, _) => match other {
+                Self::List(vector, _) | Self::Vector(vector, _) => list == vector,
                 _ => false,
             },
-            Self::HashMap(hash_map) => match other {
-                Self::HashMap(o) => hash_map == o,
+            Self::HashMap(hash_map, _) => match other {
+                Self::HashMap(o, _) => hash_map == o,
                 _ => false,
             },
-            Self::Function(_) | Self::Closure { .. } | Self::Macro { .. } => false,
-            Self::Atom(atom) => match other {
-                Self::Atom(o) => atom == o,
+            Self::Function(_, _) | Self::Closure { .. } | Self::Macro { .. } => false,
+            Self::Atom(atom, _) => match other {
+                Self::Atom(o, _) => atom == o,
                 _ => false,
             },
             Self::Comment => false,
@@ -231,23 +317,24 @@ impl Display for Value {
             Self::Symbol(s) => write!(f, "{}", s),
             Self::Keyword(k) => write!(f, ":{}", k),
             Self::String(s) => write!(f, "{}", s),
-            Self::Function(_) | Self::Closure { .. } | Self::Macro { .. } => write!(f, "#<fn>"),
-            Self::HashMap(h) => {
+            Self::Function(_, _) | Self::Closure { .. } => write!(f, "#<function>"),
+            Self::Macro { .. } => write!(f, "#<macro>"),
+            Self::HashMap(h, _) => {
                 write!(f, "{{")?;
                 display_seq(h.iter().map(HashMapKeyVal), f)?;
                 write!(f, "}}")
             }
-            Self::Vector(v) => {
+            Self::Vector(v, _) => {
                 write!(f, "[")?;
                 display_seq(v.iter(), f)?;
                 write!(f, "]")
             }
-            Self::List(l) => {
+            Self::List(l, _) => {
                 write!(f, "(")?;
                 display_seq(l.iter(), f)?;
                 write!(f, ")")
             }
-            Self::Atom(a) => write!(f, "{}", a.borrow()),
+            Self::Atom(a, _) => write!(f, "{}", a.borrow()),
             Self::Comment => Ok(()),
         }
     }
@@ -268,17 +355,17 @@ impl Debug for Value {
                 }
                 write!(f, "\"")
             }
-            Self::Vector(v) => {
+            Self::Vector(v, _) => {
                 write!(f, "[")?;
                 debug_seq(v.iter(), f)?;
                 write!(f, "]")
             }
-            Self::List(l) => {
+            Self::List(l, _) => {
                 write!(f, "(")?;
                 debug_seq(l.iter(), f)?;
                 write!(f, ")")
             }
-            Self::HashMap(h) => {
+            Self::HashMap(h, _) => {
                 write!(f, "{{")?;
                 debug_seq(h.iter().map(HashMapKeyVal), f)?;
                 write!(f, "}}")

@@ -2,6 +2,10 @@ use std::fmt::Display;
 
 use crate::value::Value;
 
+pub fn eof() -> Value {
+    Value::make_string("EOF")
+}
+
 #[inline]
 pub fn unexpected_end<D: Display>(expected: D) -> Value {
     Value::make_string(format!(
@@ -48,7 +52,7 @@ where
     Value::make_string(format!(
         "Provided argument type to \"{}\" at position {}, is not valid.\n\
          Expected \"{}\"",
-        func, arg_type, pos
+        func, pos, arg_type
     ))
 }
 
@@ -84,10 +88,8 @@ pub fn rest_parameter() -> Value {
 }
 
 #[inline]
-pub fn catch_block<OK>() -> Result<OK, Value> {
-    Err(Value::make_string(
-        "Invalid catch block. Expected \"catch*\" symbol",
-    ))
+pub fn catch_block() -> Value {
+    Value::make_string("Invalid catch block. Expected \"catch*\" symbol")
 }
 
 #[inline]

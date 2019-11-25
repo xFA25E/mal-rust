@@ -1,5 +1,6 @@
 /target
 /mal_tests
 /mal_process
+/lib
 **/*.rs.bk
 TODO.org

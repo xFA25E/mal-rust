@@ -54,17 +54,14 @@ impl Env {
     pub fn let_binds(self, binds: Vector<Value>) -> Result<Self, Value> {
         ensure_len(binds.len(), |n| n % 2 == 0, "even number of args", "let*")?;
 
-        {
-            let mut href = self.0.data.borrow_mut();
+        for (i, (k, v)) in Pairs(binds.iter()).enumerate() {
+            let key = k
+                .symbol()
+                .map(Rc::clone)
+                .ok_or_else(|| e::arg_type("let*", "symbol", i * 2))?;
+            let value = eval(v.clone(), self.clone())?;
 
-            for (i, (k, v)) in Pairs(binds.iter()).enumerate() {
-                href.insert(
-                    k.symbol()
-                        .map(Rc::clone)
-                        .ok_or_else(|| e::arg_type("let*", "symbol", i * 2))?,
-                    eval(v.clone(), self.clone())?,
-                );
-            }
+            self.0.data.borrow_mut().insert(key, value);
         }
 
         Ok(self)
@@ -73,7 +70,12 @@ impl Env {
     pub fn fn_binds(self, binds: Binds, args: Args, is_rest: bool) -> Result<Self, Value> {
         let (alen, len, mut take) = (args.len(), binds.len(), binds.len());
         if is_rest {
-            ensure_len(alen, |n| n >= len, format!("{} or more", len), "_fn*_")?;
+            ensure_len(
+                alen,
+                |n| n >= len - 1,
+                format!("{} or more", len - 1),
+                "_fn*_",
+            )?;
             take -= 1;
         } else {
             ensure_len(alen, |n| n >= len, len, "_fn*_")?;
@@ -89,7 +91,7 @@ impl Env {
             if is_rest {
                 href.insert(
                     Rc::clone(&binds[take]),
-                    Value::List(args.iter().skip(take).map(Clone::clone).collect()),
+                    Value::make_list(args.iter().skip(take).map(Clone::clone).collect()),
                 );
             }
         }
@@ -99,11 +101,12 @@ impl Env {
     pub fn with_core(self) -> Self {
         use crate::{
             core::{
-                add, apply, assoc, atom, atomp, concat, cons, containsp, count, deref, dissoc,
-                divide, emptyp, equal, falsep, first, get, greater, greater_equal, hash_map, keys,
-                keyword, keywordp, less, less_equal, list, listp, map, mapp, multiply, nilp, nth,
-                pr_str, println, prn, read_string, reset, rest, sequentialp, slurp, str, subtract,
-                swap, symbol, symbolp, throw, truep, vals, vector, vectorp,
+                add, apply, assoc, atom, atomp, concat, conj, cons, containsp, count, deref,
+                dissoc, divide, emptyp, equal, falsep, first, fnp, get, greater, greater_equal,
+                hash_map, keys, keyword, keywordp, less, less_equal, list, listp, macrop, map,
+                mapp, meta, multiply, nilp, nth, numberp, pr_str, println, prn, read_string,
+                readline, reset, rest, seq, sequentialp, slurp, str, stringp, subtract, swap,
+                symbol, symbolp, throw, time_ms, truep, vals, vector, vectorp, with_meta,
             },
             value::BuiltinFunction,
         };
@@ -159,15 +162,29 @@ impl Env {
             ("keyword", keyword),
             ("keyword?", keywordp),
             ("symbol", symbol),
+            ("readline", readline),
+            ("time-ms", time_ms),
+            ("meta", meta),
+            ("with-meta", with_meta),
+            ("fn?", fnp),
+            ("macro?", macrop),
+            ("string?", stringp),
+            ("number?", numberp),
+            ("seq", seq),
+            ("conj", conj),
         ];
 
         {
             let mut href = self.0.data.borrow_mut();
             for (n, f) in funcs {
-                href.insert(Rc::new((*n).into()), Value::Function(*f));
+                href.insert(Rc::new((*n).into()), Value::make_function(*f));
             }
 
-            href.insert(Rc::new("*ARGV*".into()), Value::List(Vector::new()));
+            href.insert(Rc::new("*ARGV*".into()), Value::make_list(Vector::new()));
+            href.insert(
+                Rc::new("*host-language*".into()),
+                Value::make_string("rust"),
+            );
         }
         self
     }
