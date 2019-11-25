@@ -185,10 +185,7 @@ impl Env {
                 Rc::new("*host-language*".into()),
                 Value::make_string("rust"),
             );
-            href.insert(
-                Rc::new("apply".into()),
-                Value::make_string("#<keyword-fn apply"),
-            );
+            href.insert(Rc::new("apply".into()), Value::make_symbol("apply"));
         }
         self
     }
