@@ -1,2 +1,2 @@
-#+TITLE: My Implementation of Make-A-Lisp
+#+TITLE: My Implementation of Make-A-Lisp in Rust
 [[https://github.com/kanaka/mal]]
